@@ -48,6 +48,18 @@ class PhoneGuiTests(unittest.TestCase):
         self.assertIn('phone:first', self.app.camera_sources.values())
         self.assertIn('phone:second', self.app.camera_sources.values())
 
+    def test_form_selects_up_to_three_camera_sources(self):
+        self.app.phone_hub.registry.connect('first', 'Front', 'one')
+        self.app.phone_hub.registry.connect('second', 'Side', 'two')
+        self.app._set_camera_options([])
+        labels = {source: label for label, source in self.app.camera_sources.items()}
+        self.app.camera_choices[0].set(labels['phone:first'])
+        self.app.camera_choices[1].set(labels['phone:second'])
+        self.app.camera_choices[2].set('Off')
+        _, profile = self.app._configuration_from_form()
+        self.assertEqual(profile.camera_sources, ('phone:first', 'phone:second'))
+        self.assertEqual(profile.tracking_mode, 'MULTI')
+
     def test_vrchat_height_is_read_from_form(self):
         self.app.user_height.set('1.83')
         _, profile = self.app._configuration_from_form()

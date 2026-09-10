@@ -4,7 +4,8 @@ port = 9000
 
 [camera]
 cam-index = [0]
-source = "phone:200c2735-9348-4681-9a2c-afaa2c54cbe2"
+source = "phone:b101ebe2-d5eb-481b-a098-470d38707ccb"
+sources = ["phone:b101ebe2-d5eb-481b-a098-470d38707ccb"]
 show-output = true
 
 [tracking]

@@ -1,6 +1,7 @@
 import tempfile
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 from Lib.Config import (
     ConfigurationError,
@@ -10,6 +11,7 @@ from Lib.Config import (
     load_profile,
     load_settings,
     save_settings,
+    save_profile,
     validate_profile,
     validate_settings,
 )
@@ -32,6 +34,20 @@ class ConfigurationTests(unittest.TestCase):
             save_settings(expected, path)
             self.assertEqual(load_settings(path), expected)
 
+    def test_multi_camera_profile_round_trip(self):
+        with tempfile.TemporaryDirectory() as directory, patch("Lib.Config.PROFILES_DIR", Path(directory)):
+            expected = Profile(
+                name="Multi Test",
+                camera_source="phone:front",
+                camera_sources=("phone:front", "phone:left", "local:1"),
+                tracking_mode="MULTI",
+            )
+            save_profile(expected)
+            loaded = load_profile("Multi Test")
+            self.assertEqual(loaded.camera_sources, expected.camera_sources)
+            self.assertEqual(loaded.camera_source, "phone:front")
+            self.assertEqual(loaded.tracking_mode, "MULTI")
+
     def test_invalid_ranges_are_rejected(self):
         with self.assertRaises(ConfigurationError):
             validate_settings(Settings(fps=0))
@@ -40,9 +56,23 @@ class ConfigurationTests(unittest.TestCase):
         with self.assertRaises(ConfigurationError):
             validate_profile(Profile(camera_index=-1))
 
-    def test_unimplemented_multi_mode_is_rejected(self):
-        with self.assertRaisesRegex(ConfigurationError, "Only SINGLE"):
-            validate_profile(Profile(tracking_mode="MULTI"))
+    def test_multi_mode_accepts_two_or_three_unique_sources(self):
+        validate_profile(Profile(
+            camera_source="local:0",
+            camera_sources=("local:0", "phone:side"),
+            tracking_mode="MULTI",
+        ))
+        validate_profile(Profile(
+            camera_source="local:0",
+            camera_sources=("local:0", "phone:side", "phone:rear"),
+            tracking_mode="MULTI",
+        ))
+        with self.assertRaisesRegex(ConfigurationError, "between one and three"):
+            validate_profile(Profile(camera_sources=("local:0", "phone:a", "phone:b", "phone:c"), tracking_mode="MULTI"))
+        with self.assertRaisesRegex(ConfigurationError, "unique"):
+            validate_profile(Profile(camera_sources=("local:0", "local:0"), tracking_mode="MULTI"))
+        with self.assertRaisesRegex(ConfigurationError, "must be MULTI"):
+            validate_profile(Profile(camera_sources=("local:0", "phone:side"), tracking_mode="SINGLE"))
 
     def test_pose_quality_is_validated(self):
         for quality in ("lite", "full", "heavy"):

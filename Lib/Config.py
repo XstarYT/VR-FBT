@@ -51,6 +51,7 @@ class Profile:
     server_port: int = 9000
     camera_index: int = 0
     camera_source: str = "local:0"
+    camera_sources: tuple[str, ...] = ()
     show_output: bool = True
     tracking_mode: str = "SINGLE"
     smooth: bool = True
@@ -133,12 +134,18 @@ def load_profile(name: str) -> Profile:
         indices = camera.get("cam-index", [0])
         if not isinstance(indices, list) or not indices:
             raise ConfigurationError("camera.cam-index must contain at least one index")
+        legacy_source = str(camera.get("source", f"local:{int(indices[0])}"))
+        raw_sources = camera.get("sources", [legacy_source])
+        if not isinstance(raw_sources, list) or not raw_sources:
+            raise ConfigurationError("camera.sources must contain between one and three sources")
+        sources = tuple(str(value) for value in raw_sources)
         profile = Profile(
             name=path.stem,
             server_ip=str(server.get("ip", "127.0.0.1")),
             server_port=int(server.get("port", 9000)),
             camera_index=int(indices[0]),
-            camera_source=str(camera.get("source", f"local:{int(indices[0])}")),
+            camera_source=sources[0],
+            camera_sources=sources,
             show_output=bool(camera.get("show-output", True)),
             tracking_mode=str(tracking.get("mode", "single")).upper(),
             smooth=bool(tracking.get("smooth", True)),
@@ -159,13 +166,16 @@ def save_profile(profile: Profile) -> None:
     safe_name = "".join(c for c in profile.name.strip() if c.isalnum() or c in "-_ ")
     if not safe_name or safe_name != profile.name.strip():
         raise ConfigurationError("Profile name may only contain letters, numbers, spaces, - and _")
+    sources = profile_camera_sources(profile)
+    local_indices = [int(source.split(":", 1)[1]) for source in sources if source.startswith("local:")]
     text = (
         "[server]\n"
         f"ip = {json.dumps(profile.server_ip)}\n"
         f"port = {profile.server_port}\n\n"
         "[camera]\n"
-        f"cam-index = [{profile.camera_index}]\n"
-        f"source = {json.dumps(profile.camera_source)}\n"
+        f"cam-index = {json.dumps(local_indices or [profile.camera_index])}\n"
+        f"source = {json.dumps(sources[0])}\n"
+        f"sources = {json.dumps(list(sources))}\n"
         f"show-output = {str(profile.show_output).lower()}\n\n"
         "[tracking]\n"
         f"mode = {json.dumps(profile.tracking_mode.lower())}\n"
@@ -196,16 +206,25 @@ def validate_profile(profile: Profile) -> None:
         raise ConfigurationError("OSC port must be between 1 and 65535")
     if profile.camera_index < 0:
         raise ConfigurationError("Camera index cannot be negative")
-    if not (profile.camera_source.startswith("local:") or profile.camera_source.startswith("phone:")):
-        raise ConfigurationError("Camera source must start with local: or phone:")
-    if profile.camera_source.startswith("local:"):
-        try:
-            if int(profile.camera_source.split(":", 1)[1]) < 0:
-                raise ValueError
-        except ValueError as exc:
-            raise ConfigurationError("Local camera source must contain a non-negative index") from exc
-    if profile.tracking_mode != "SINGLE":
-        raise ConfigurationError("Only SINGLE-camera tracking is implemented")
+    sources = profile_camera_sources(profile)
+    if not 1 <= len(sources) <= 3:
+        raise ConfigurationError("Select between one and three camera sources")
+    if len(set(sources)) != len(sources):
+        raise ConfigurationError("Camera sources must be unique")
+    for source in sources:
+        if not (source.startswith("local:") or source.startswith("phone:")):
+            raise ConfigurationError("Camera source must start with local: or phone:")
+        if source.startswith("local:"):
+            try:
+                if int(source.split(":", 1)[1]) < 0:
+                    raise ValueError
+            except ValueError as exc:
+                raise ConfigurationError("Local camera source must contain a non-negative index") from exc
+        elif not source.split(":", 1)[1].strip():
+            raise ConfigurationError("Phone camera source must contain a device id")
+    expected_mode = "MULTI" if len(sources) > 1 else "SINGLE"
+    if profile.tracking_mode != expected_mode:
+        raise ConfigurationError(f"Tracking mode must be {expected_mode} for {len(sources)} selected camera(s)")
     if profile.pose_quality not in {"lite", "full", "heavy"}:
         raise ConfigurationError("Pose quality must be lite, full, or heavy")
     if not 1.0 <= profile.user_height_m <= 2.5:
@@ -213,6 +232,11 @@ def validate_profile(profile: Profile) -> None:
     if profile.vrchat_tracker_set not in {"stable", "full"}:
         raise ConfigurationError("VRChat tracker set must be stable or full")
     _named_file(JOINT_MAPS_DIR, profile.joint_map, ".json")
+
+
+def profile_camera_sources(profile: Profile) -> tuple[str, ...]:
+    """Return the ordered sources while remaining compatible with old profiles."""
+    return tuple(profile.camera_sources) if profile.camera_sources else (profile.camera_source,)
 
 
 def load_joint_map(name: str) -> dict:

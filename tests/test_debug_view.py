@@ -4,7 +4,8 @@ import unittest
 import cv2
 import numpy as np
 
-from Lib.DebugView import project_landmarks, render_tracking_debug
+from Lib.DebugView import DebugScene3D, project_landmarks, render_tracking_debug
+from Lib.Tracking import CameraPose
 
 
 class TrackingDebugViewTests(unittest.TestCase):
@@ -36,6 +37,30 @@ class TrackingDebugViewTests(unittest.TestCase):
         rendered = render_tracking_debug(source, [[0.5, 0.5, 0.0, 0.1]], 0.1, 2.0, 1, "phone", cv2)
         self.assertEqual(rendered.shape, source.shape)
         self.assertGreater(np.count_nonzero(rendered), 0)
+
+    def test_rotatable_3d_scene_draws_skeleton_and_camera(self):
+        scene = DebugScene3D(cv2, 640, 480)
+        landmarks = [[(index % 4) * 0.12, index * 0.04 - 0.6, (index % 3) * 0.08, 0.9] for index in range(31)]
+        camera = CameraPose(
+            "phone:test",
+            (1.5, 0.8, -2.5),
+            ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
+            2.0,
+        )
+        rendered = scene.render(landmarks, [camera], 0.88, 28.0, "TRACKING", 1)
+        self.assertEqual(rendered.shape, (480, 640, 3))
+        self.assertGreater(np.count_nonzero(rendered), 10_000)
+        fixed_center = scene._world_center.copy()
+        shifted = [[x + 0.8, y, z + 0.4, visibility] for x, y, z, visibility in landmarks]
+        scene.render(shifted, [camera], 0.88, 28.0, "TRACKING", 1)
+        self.assertTrue(np.array_equal(scene._world_center, fixed_center))
+        original_yaw = scene.yaw
+        scene.mouse_callback(cv2.EVENT_LBUTTONDOWN, 100, 100, 0)
+        scene.mouse_callback(cv2.EVENT_MOUSEMOVE, 150, 110, 0)
+        scene.mouse_callback(cv2.EVENT_LBUTTONUP, 150, 110, 0)
+        self.assertNotEqual(scene.yaw, original_yaw)
+        scene.reset_world()
+        self.assertIsNone(scene._world_center)
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ Windows camera-based full-body tracking for VRChat. VR-FBT runs Google's MediaPi
 - Windows 10 or 11
 - 64-bit Python 3.12
 - VRChat for Windows with OSC enabled
-- A local webcam, or a phone and PC on the same local network
+- One to three local webcams/phones; phones and PC must share the same local network
 - OpenSSL (Git for Windows' bundled OpenSSL is detected automatically)
 
 ## Install and run
@@ -28,7 +28,7 @@ After setup, `run.bat` starts the repository-local environment without manual ac
 ## Use with VRChat
 
 1. Start VRChat. Open the Action Menu, choose **OSC**, and set **Enabled** on.
-2. In VR-FBT select the camera, set your real height in meters, and leave the VRChat OSC destination at `127.0.0.1:9000` when VRChat is on this PC. `localhost` is also accepted and is explicitly resolved to IPv4 because VRChat's Windows listener uses IPv4.
+2. In VR-FBT select a primary camera and optionally camera 2 and camera 3, set your real height in meters, and leave the VRChat OSC destination at `127.0.0.1:9000` when VRChat is on this PC. `localhost` is also accepted and is explicitly resolved to IPv4 because VRChat's Windows listener uses IPv4.
 3. Place the camera where it sees your complete body, including both feet. Stand upright and face it.
 4. Keep **VRChat trackers** on **Stable — hip + feet** first. Click **Start tracking**, stand upright facing the camera with your whole body visible, and hold still until the debug overlay changes from `CALIBRATING` to `TRACKING`. The app uses 20 stable frames to lock height scale and forward direction, sends a one-shot head-rotation alignment, and then supplies a filtered head position continuously so the hip-relative camera skeleton follows the live HMD.
 5. Use VRChat's normal full-body calibration for your avatar. If the tracking space becomes offset or the camera moves, return to the neutral stance and click **Recalibrate & align**.
@@ -45,7 +45,7 @@ The recommended **Stable** mode sends only tracker 2 (hip) and trackers 7–8 (f
 
 For each tracker it sends both `/tracking/trackers/{1-8}/position` in meters and `/tracking/trackers/{1-8}/rotation` in Euler degrees. A confident, filtered head position keeps VRChat's tracker space attached to the headset; head rotation is a single calibration pulse. Low-confidence joints are briefly held through short occlusions and then withheld instead of sending unreliable updates. See VRChat's [OSC Trackers contract](https://docs.vrchat.com/docs/osc-trackers) and [OSC overview](https://docs.vrchat.com/docs/osc-overview).
 
-Keep **Tracking debug overlay** enabled while positioning the camera. It shows the skeleton, confidence, visible points, processing FPS, camera source, and whether tracking is currently usable. Press Q in that window or click **Stop** in VR-FBT.
+Keep the **Rotatable 3D debug window** enabled while positioning cameras. It shows the fused wireframe, fixed approximate camera poses, confidence, processing FPS, and whether tracking is usable. The grid and cameras remain anchored to the calibrated world while the skeleton moves through it. Each camera label includes the retained calibration sample count, positional spread, and reprojection error. Drag with the left mouse button to orbit, use the mouse wheel to zoom, press R to reset the view, or Q to stop tracking.
 
 ### Pose models
 
@@ -65,7 +65,15 @@ There is one phone connection method: direct local-network HTTPS. There is no An
 4. Press **Start camera**, allow camera access, then select the phone by its camera name under **Camera Source**.
 5. If Windows Firewall asks, allow Python/VR-FBT on **Private networks** only.
 
-The link includes a random session token and changes after restart. Keep it within your local network. WebRTC is attempted first with no STUN or TURN relay; JPEG-over-secure-WebSocket is the fallback. The receiver keeps only the newest frame so old frames do not build up into extra tracking latency. Up to eight phones can connect and remain individually selectable, though one tracking session currently uses one selected camera.
+The link includes a random session token and changes after restart. Keep it within your local network. WebRTC is attempted first with no STUN or TURN relay; JPEG-over-secure-WebSocket is the fallback. The receiver keeps only the newest frame so old frames do not build up into extra tracking latency. Up to three phones can connect and all three can be used by one tracking session.
+
+## Multi-camera tracking and calibration
+
+Select two or three different cameras in the setup screen, then start tracking while standing still with your full body visible in every view. The first 12 usable frames estimate each camera's approximate pose, followed by the normal 20-frame body/VRChat calibration. Place cameras at visibly different angles—front plus side is much better than putting them next to each other.
+
+The calibration assumes a typical 60-degree horizontal phone-camera field of view because browsers do not expose reliable lens calibration. It uses the detected neutral skeleton as a temporary calibration target, rejects high-reprojection-error solutions, removes statistical outliers, and computes the fixed camera transform from an error-weighted rotation/translation average. A joint is triangulated only when at least two views provide it. If a joint or camera drops out after calibration, the fusion layer falls back to aligned metric landmarks and the existing short-occlusion hold instead of emitting an invalid 3D point. The camera frustums in the debug window are therefore useful placement estimates, not survey-grade measurements.
+
+Re-run **Recalibrate & align** whenever any camera is moved. A checkerboard/lens-calibration workflow would be required for measurement-grade triangulation; this automatic mode is designed for practical VR tracking setup without extra calibration props.
 
 Browser camera access generally requires a secure context. Some mobile browsers may still refuse `getUserMedia` after merely continuing past a self-signed certificate warning. The app no longer exposes a certificate-download QR, as requested; if a specific phone refuses camera permission, that browser/device will need a trusted local certificate or a different locally trusted setup.
 
@@ -82,6 +90,6 @@ node tests/phone_webrtc_page.test.cjs
 python -m pip check
 ```
 
-The suite covers VRChat path construction, all eight position/rotation transforms, head alignment packets, coordinate conversion, height validation, confidence filtering, real MediaPipe startup, local TLS, direct WebRTC frame delivery, secure-WebSocket fallback, multi-phone identity/routing, GUI lifecycle, and clean shutdown.
+The suite covers VRChat path construction, all eight position/rotation transforms, head alignment packets, coordinate conversion, height validation, confidence filtering, synthetic multi-view camera recovery and triangulation, the rotatable 3D renderer, real MediaPipe startup, local TLS, direct WebRTC frame delivery, secure-WebSocket fallback, the three-phone connection cap, multi-phone identity/routing, GUI lifecycle, and clean shutdown.
 
 Software tests cannot prove physical avatar alignment. The remaining acceptance test is to view the generated trackers in VRChat with the intended camera position, perform avatar calibration, and check neutral standing, turns, squats, feet, and occlusion recovery. See `AUDIT.md` for the evidence and remaining limitations.

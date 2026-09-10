@@ -8,7 +8,7 @@ import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from Lib.Config import ConfigurationError, Profile, Settings, list_profiles, load_profile, load_settings, run_diagnostics, save_profile, save_settings
+from Lib.Config import ConfigurationError, Profile, Settings, list_profiles, load_profile, load_settings, profile_camera_sources, run_diagnostics, save_profile, save_settings
 from Lib.Engine import EngineCallbacks, TrackingController
 from Lib.RemoteCam import LocalCamera, RemoteCameraHub, discover_local_cameras, ensure_local_certificates, find_openssl
 
@@ -89,7 +89,12 @@ class VRFBTApp(tk.Tk):
 
     def _build_variables(self) -> None:
         self.profile_name, self.fps = tk.StringVar(value="Default"), tk.StringVar(value="30")
-        self.camera_choice = tk.StringVar(value="Local · Camera 0")
+        self.camera_choices = [
+            tk.StringVar(value="Local · Camera 0"),
+            tk.StringVar(value="Off"),
+            tk.StringVar(value="Off"),
+        ]
+        self.camera_choice = self.camera_choices[0]  # compatibility for integrations/tests
         self.phone_url = tk.StringVar(value="Phone server is stopped")
         self.show_output, self.smooth = tk.BooleanVar(value=True), tk.BooleanVar(value=True)
         self.tracking_mode, self.joint_map = tk.StringVar(value="SINGLE"), tk.StringVar(value="FULLMAP")
@@ -127,7 +132,12 @@ class VRFBTApp(tk.Tk):
         self.profile_combo = self._field(left, "PROFILE", self.profile_name, "combo", list_profiles())
         self.profile_combo.bind("<<ComboboxSelected>>", lambda _event: self._load_selected_profile())
         self._field(left, "TARGET FPS", self.fps)
-        self.camera_combo = self._field(left, "CAMERA SOURCE", self.camera_choice, "combo", [])
+        self.camera_combos = [
+            self._field(left, "CAMERA 1 — PRIMARY", self.camera_choices[0], "combo", []),
+            self._field(left, "CAMERA 2 — OPTIONAL", self.camera_choices[1], "combo", ["Off"]),
+            self._field(left, "CAMERA 3 — OPTIONAL", self.camera_choices[2], "combo", ["Off"]),
+        ]
+        self.camera_combo = self.camera_combos[0]  # compatibility for integrations/tests
         camera_actions = ttk.Frame(left, style="Panel.TFrame"); camera_actions.pack(fill="x", pady=(0, 13))
         ttk.Button(camera_actions, text="Refresh cameras", command=self._refresh_cameras).pack(side="left")
         self.phone_button = ttk.Button(camera_actions, text="Connect phone on LAN", command=self._start_phone_server); self.phone_button.pack(side="left", padx=8)
@@ -140,7 +150,7 @@ class VRFBTApp(tk.Tk):
         self._field(right, "VRCHAT OSC HOST", self.osc_host); self._field(right, "VRCHAT OSC PORT", self.osc_port)
         ttk.Label(right, text="In VRChat: Action Menu → OSC → Enabled", foreground=GOOD, style="Panel.TLabel").pack(anchor="w", pady=(0, 8))
         checks = ttk.Frame(right, style="Panel.TFrame"); checks.pack(fill="x", pady=(14, 24))
-        ttk.Checkbutton(checks, text="Tracking debug overlay (skeleton + status)", variable=self.show_output).pack(anchor="w", pady=5)
+        ttk.Checkbutton(checks, text="Rotatable 3D debug window (cameras + wireframe)", variable=self.show_output).pack(anchor="w", pady=5)
         ttk.Checkbutton(checks, text="Smooth landmark motion", variable=self.smooth).pack(anchor="w", pady=5)
         actions = ttk.Frame(right, style="Panel.TFrame"); actions.pack(fill="x", pady=(10, 0))
         self.start_button = ttk.Button(actions, text="Start tracking", style="Accent.TButton", command=self._start); self.start_button.pack(side="left")
@@ -181,14 +191,20 @@ class VRFBTApp(tk.Tk):
             self.user_height.set(f"{p.user_height_m:.2f}")
             self.pose_quality.set(next((label for label, value in POSE_QUALITY_LABELS.items() if value == p.pose_quality), "Full — balanced (recommended)"))
             self.tracker_set.set(next((label for label, value in TRACKER_SET_LABELS.items() if value == p.vrchat_tracker_set), "Stable — hip + feet (recommended)"))
-            self._select_source(p.camera_source)
+            self._select_sources(profile_camera_sources(p))
         except Exception as exc: self._write_log("ERROR", str(exc))
 
     def _configuration_from_form(self):
-        source = self.camera_sources.get(self.camera_choice.get(), self.loaded_profile.camera_source)
+        sources = tuple(
+            source for choice in self.camera_choices
+            if choice.get() != "Off" and (source := self.camera_sources.get(choice.get()))
+        )
+        if not sources:
+            sources = profile_camera_sources(self.loaded_profile)
+        source = sources[0]
         camera_index = int(source.split(":", 1)[1]) if source.startswith("local:") else self.loaded_profile.camera_index
         settings = Settings(fps=int(self.fps.get()), default_profile=self.profile_name.get(), tcp_server=self.loaded_settings.tcp_server, udp_server=self.loaded_settings.udp_server, live_switch=self.loaded_settings.live_switch)
-        profile = Profile(name=self.profile_name.get(), server_ip=self.osc_host.get().strip(), server_port=int(self.osc_port.get()), camera_index=camera_index, camera_source=source, show_output=self.show_output.get(), tracking_mode=self.tracking_mode.get(), smooth=self.smooth.get(), pose_quality=POSE_QUALITY_LABELS.get(self.pose_quality.get(), "full"), vrchat_tracker_set=TRACKER_SET_LABELS.get(self.tracker_set.get(), "stable"), joint_map=self.joint_map.get(), joy_con_remote=self.loaded_profile.joy_con_remote, user_height_m=float(self.user_height.get()))
+        profile = Profile(name=self.profile_name.get(), server_ip=self.osc_host.get().strip(), server_port=int(self.osc_port.get()), camera_index=camera_index, camera_source=source, camera_sources=sources, show_output=self.show_output.get(), tracking_mode="MULTI" if len(sources) > 1 else "SINGLE", smooth=self.smooth.get(), pose_quality=POSE_QUALITY_LABELS.get(self.pose_quality.get(), "full"), vrchat_tracker_set=TRACKER_SET_LABELS.get(self.tracker_set.get(), "stable"), joint_map=self.joint_map.get(), joy_con_remote=self.loaded_profile.joy_con_remote, user_height_m=float(self.user_height.get()))
         return settings, profile
 
     def _save(self, quiet=False) -> bool:
@@ -283,11 +299,15 @@ class VRFBTApp(tk.Tk):
         threading.Thread(target=lambda: self.events.put(("camera-scan", discover_local_cameras())), name="camera-discovery", daemon=True).start()
 
     def _set_camera_options(self, local_cameras) -> None:
-        selected_source = self.camera_sources.get(self.camera_choice.get(), self.loaded_profile.camera_source)
+        configured_sources = profile_camera_sources(self.loaded_profile)
+        selected_sources = [self.camera_sources.get(choice.get()) for choice in self.camera_choices]
+        if not any(selected_sources):
+            selected_sources = list(configured_sources)
         cameras = list(local_cameras)
-        if not any(camera.source_id == self.loaded_profile.camera_source for camera in cameras) and self.loaded_profile.camera_source.startswith("local:"):
-            index = int(self.loaded_profile.camera_source.split(":", 1)[1])
-            cameras.append(LocalCamera(index, f"Camera {index}"))
+        for configured in configured_sources:
+            if not any(camera.source_id == configured for camera in cameras) and configured.startswith("local:"):
+                index = int(configured.split(":", 1)[1])
+                cameras.append(LocalCamera(index, f"Camera {index}"))
         self.local_cameras = cameras
         sources = {camera.display_name: camera.source_id for camera in cameras}
         for camera in self.phone_hub.registry.list_cameras():
@@ -295,18 +315,29 @@ class VRFBTApp(tk.Tk):
             if label in sources:
                 label = f'{label} [{camera.device_id[:8]}]'
             sources[label] = camera.source_id
+        for configured in configured_sources:
+            if configured not in sources.values():
+                kind, identifier = configured.split(":", 1)
+                sources[f"Saved · {kind} {identifier[:24]} (offline)"] = configured
         self.camera_sources = sources
-        self.camera_combo.configure(values=list(sources))
-        self._select_source(selected_source)
+        values = list(sources)
+        self.camera_combos[0].configure(values=values)
+        for combo in self.camera_combos[1:]:
+            combo.configure(values=["Off", *values])
+        self._select_sources(tuple(source for source in selected_sources if source))
         if sources and self.camera_choice.get() not in sources:
             self.camera_choice.set(next(iter(sources)))
         local_count = len(cameras); phone_count = len(self.phone_hub.registry.list_cameras(False))
         self._write_log("PASS", f"Camera list updated: {local_count} local, {phone_count} connected phone(s)")
 
     def _select_source(self, source_id: str) -> None:
-        display = next((name for name, value in self.camera_sources.items() if value == source_id), None)
-        if display:
-            self.camera_choice.set(display)
+        self._select_sources((source_id,))
+
+    def _select_sources(self, source_ids) -> None:
+        for index, choice in enumerate(self.camera_choices):
+            source_id = source_ids[index] if index < len(source_ids) else None
+            display = next((name for name, value in self.camera_sources.items() if value == source_id), None)
+            choice.set(display if display else (choice.get() if index == 0 else "Off"))
 
     def _start_phone_server(self) -> None:
         if self.primary_phone_url and self.phone_hub.running:

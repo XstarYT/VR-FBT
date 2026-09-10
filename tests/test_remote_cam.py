@@ -119,6 +119,25 @@ class RemoteCameraServerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.hub.registry.list_cameras(False), [])
             self.hub.stop()  # Idempotent even after the event loop closes.
 
+    async def test_phone_hub_enforces_three_camera_limit(self):
+        from aiohttp import ClientSession, WSServerHandshakeError
+        base = f'http://127.0.0.1:{self.hub.port}'
+        sockets = []
+        async with ClientSession() as session:
+            try:
+                for index in range(3):
+                    sockets.append(await session.ws_connect(
+                        base + '/ws', params={'token': self.hub.token, 'device_id': f'phone-{index}'},
+                    ))
+                with self.assertRaises(WSServerHandshakeError) as error:
+                    await session.ws_connect(
+                        base + '/ws', params={'token': self.hub.token, 'device_id': 'phone-4'},
+                    )
+                self.assertEqual(error.exception.status, 503)
+            finally:
+                for websocket in sockets:
+                    await websocket.close()
+
     @unittest.skipUnless(importlib.util.find_spec("cv2"), "OpenCV is not installed")
     async def test_real_jpeg_websocket_to_capture_decode(self):
         from aiohttp import ClientSession

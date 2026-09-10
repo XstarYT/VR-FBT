@@ -23,6 +23,7 @@ from typing import Callable
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WEB_PAGE = PROJECT_ROOT / "Content" / "Website" / "index.html"
 MAX_FRAME_BYTES = 4 * 1024 * 1024
+MAX_PHONE_CAMERAS = 3
 CERTIFICATE_DIR = Path(os.environ.get("LOCALAPPDATA", PROJECT_ROOT)) / "VR-FBT" / "certificates"
 OPENSSL_MARKER = ".generated-by-openssl"
 
@@ -445,8 +446,8 @@ class RemoteCameraHub:
                 raise web.HTTPBadRequest(text="invalid device_id")
             if device_id in self._sockets or device_id in self._peers:
                 raise web.HTTPConflict(text="This phone is already connected in another tab")
-            if len(self._sockets) + len(self._peers) >= 8:
-                raise web.HTTPServiceUnavailable(text="Maximum of 8 cameras reached")
+            if len(self._sockets) + len(self._peers) >= MAX_PHONE_CAMERAS:
+                raise web.HTTPServiceUnavailable(text=f"Maximum of {MAX_PHONE_CAMERAS} cameras reached")
             return device_id, name
 
         async def webrtc_offer(request):
@@ -555,8 +556,9 @@ class RemoteCameraHub:
 class RemoteCapture:
     """OpenCV-compatible reader for one registered phone camera."""
 
-    def __init__(self, registry: RemoteCameraRegistry, device_id: str, cv2_module):
+    def __init__(self, registry: RemoteCameraRegistry, device_id: str, cv2_module, timeout: float = 3.0):
         self.registry, self.device_id, self.cv2 = registry, device_id, cv2_module
+        self.timeout = max(0.01, float(timeout))
         self.sequence = 0
         self.closed = False
 
@@ -566,7 +568,7 @@ class RemoteCapture:
     def read(self):
         import numpy as np
 
-        result = self.registry.wait_for_frame(self.device_id, self.sequence, 3.0)
+        result = self.registry.wait_for_frame(self.device_id, self.sequence, self.timeout)
         if result is None:
             return False, None
         self.sequence, encoded = result
