@@ -1,5 +1,3 @@
-from pythonosc.udp_client import SimpleUDPClient
-
 class Const:
 	BasePath = '/tracking/trackers/'
 
@@ -7,7 +5,7 @@ class Const:
 		Position = 'position'
 		Rotation = 'rotation'
 
-class Pharse:
+class Phrase:
 	@staticmethod
 	def list(OSCList):
 		return ( OSCList[0]+OSCList[1]+'/'+OSCList[2], OSCList[3] )
@@ -18,8 +16,11 @@ class Pharse:
 
 	@staticmethod
 	def str(OSCStr): # '{BasePath}{TrackerID}/{Type}|{Data}'
-		msg = OSCStr.split('|')
-		return (msg[0], eval(msg[1]))
+		import ast
+		msg = OSCStr.split('|', 1)
+		if len(msg) != 2:
+			raise ValueError('OSC string must contain a | separator')
+		return (msg[0], ast.literal_eval(msg[1]))
 
 	@staticmethod
 	def direct(BasePath, TrackerID, Type, Data):
@@ -31,10 +32,21 @@ class Pharse:
 
 class Server:
 	def __init__(self, ip, port=9000):
-		self.client = SimpleUDPClient(ip, port)
+		import socket
+		from pythonosc.udp_client import SimpleUDPClient
+		# VRChat's default OSC listener binds IPv4 (0.0.0.0:9000). On
+		# Windows, "localhost" commonly resolves to IPv6 ::1 first, which
+		# makes python-osc silently send to a socket VRChat is not listening on.
+		self.target = (socket.gethostbyname(ip), int(port))
+		self.client = SimpleUDPClient(self.target[0], self.target[1], family=socket.AF_INET)
 
 	def Send(self, msg):
 		self.client.send_message(msg[0], msg[1])
 
+	def close(self):
+		self.client._sock.close()
 
+
+# Backward-compatible alias for the original misspelling.
+Pharse = Phrase
 

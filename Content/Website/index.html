@@ -1,39 +1,258 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-	<title>RemoteCam</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1020">
+  <title>VR-FBT Phone Camera</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; background: #0b1020; color: #edf2ff; }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 20px; background: radial-gradient(circle at top, #202a4b, #0b1020 48%); }
+    main { width: min(100%, 620px); }
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+    h1 { margin: 0; font-size: 1.45rem; }
+    .pill { padding: 7px 11px; border-radius: 999px; background: #182238; color: #8fa1c0; font-size: .78rem; font-weight: 700; }
+    .pill.live { color: #38d39f; }
+    .card { background: rgba(18,26,44,.96); border: 1px solid #273452; border-radius: 20px; overflow: hidden; box-shadow: 0 22px 70px #0007; }
+    .preview { position: relative; aspect-ratio: 4/3; background: #050810; }
+    video { width: 100%; height: 100%; display: block; object-fit: cover; }
+    .empty { position: absolute; inset: 0; display: grid; place-items: center; color: #8fa1c0; text-align: center; padding: 30px; }
+    .controls { padding: 18px; display: grid; gap: 13px; }
+    label { display: grid; gap: 6px; color: #aebbd2; font-size: .82rem; font-weight: 650; }
+    input, select, button { width: 100%; min-height: 46px; border: 0; border-radius: 11px; padding: 0 13px; font: inherit; }
+    input, select { color: #edf2ff; background: #182238; outline: 1px solid #2a3858; }
+    button { color: white; background: #7c5cff; font-weight: 750; cursor: pointer; }
+    button.secondary { background: #25314d; }
+    button:disabled { opacity: .55; cursor: default; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .notice { padding: 11px 13px; border-radius: 10px; background: #352c18; color: #ffd980; font-size: .83rem; line-height: 1.45; }
+    .notice.error { background: #3b1822; color: #ff9aae; }
+    small { color: #8fa1c0; line-height: 1.45; }
+    canvas { display: none; }
+  </style>
 </head>
 <body>
-	<video id="video" autoplay></video>
-	<script defer>
-		const vid = document.getElementById('video');
+<main>
+  <header><h1>VR-FBT Phone Camera</h1><span id="status" class="pill">OFFLINE</span></header>
+  <section class="card">
+    <div class="preview">
+      <video id="video" autoplay muted playsinline></video>
+      <div id="empty" class="empty">Tap Start camera to share this phone’s video with VR-FBT.</div>
+    </div>
+    <div class="controls">
+      <div id="notice" class="notice" hidden></div>
+      <label>Device name<input id="name" maxlength="80" value="Phone camera" autocomplete="off"></label>
+      <label>Camera<select id="camera"><option value="">Browser default camera</option></select></label>
+      <div class="row">
+        <label>Frame rate<select id="fps"><option>10</option><option>15</option><option>20</option><option selected>30</option></select></label>
+        <label>Quality<select id="quality"><option value="0.5">Data saver</option><option value="0.7" selected>Balanced</option><option value="0.85">High</option></select></label>
+      </div>
+      <div class="row"><button id="start">Start camera</button><button id="stop" class="secondary" disabled>Stop</button></div>
+      <small id="privacy">Keep this page open and the phone awake. Only share your link with your own devices.</small>
+    </div>
+  </section>
+  <canvas id="canvas"></canvas>
+</main>
+<script>
+(() => {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const video = $('video'), canvas = $('canvas'), context = canvas.getContext('2d', {alpha: false});
+  const link = new URLSearchParams(location.hash.slice(1));
+  const token = link.get('token') || new URLSearchParams(location.search).get('token') || '';
+  const forceWebSocket = link.get('transport') === 'websocket';
+  let clientId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+  try {
+    clientId = localStorage.getItem('vrfbt-device-id') || clientId;
+    localStorage.setItem('vrfbt-device-id', clientId);
+    $('name').value = localStorage.getItem('vrfbt-device-name') || 'Phone camera';
+  } catch (_) { /* Private browsing may disable storage. */ }
+  if (link.get('device')) clientId = link.get('device');
+  if (link.get('name')) $('name').value = link.get('name').slice(0, 80);
+  let stream = null, socket = null, timer = null, encoding = false, sent = 0;
+  let peer = null, offerController = null, statsTimer = null;
+  let generation = 0, reconnectTimer = null, retries = 0, connectTimer = null;
+  $('privacy').textContent = 'Direct mode: encrypted video travels only between this phone and the PC. No cloud relay is used.';
 
-		navigator.mediaDevices.getUserMedia({video: true}).then(stream => {
-			video.srcObject = stream;
-		});
+  function notice(message, error = false) {
+    $('notice').hidden = !message; $('notice').textContent = message;
+    $('notice').className = error ? 'notice error' : 'notice';
+  }
+  function state(label, live = false) { $('status').textContent = label; $('status').className = live ? 'pill live' : 'pill'; }
+  function setRunning(running) { $('start').disabled = running; $('stop').disabled = !running; $('camera').disabled = running; $('empty').hidden = running; }
 
-		const ws = new WebSocket('ws://localhost:9100');
+  async function refreshCameras() {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+    const devices = (await navigator.mediaDevices.enumerateDevices()).filter(device => device.kind === 'videoinput');
+    const selected = $('camera').value;
+    $('camera').innerHTML = '<option value="">Browser default camera</option>';
+    devices.forEach((device, index) => {
+      const option = document.createElement('option'); option.value = device.deviceId;
+      option.textContent = device.label || `Camera ${index + 1}`; $('camera').append(option);
+    });
+    if ([...$('camera').options].some(option => option.value === selected)) $('camera').value = selected;
+  }
 
-		ws.onopen = () => console.log("Connected");
-		ws.onclose = () => console.log("Closed");
-		ws.onerror = (err) => console.error("WS error", err);
+  async function start() {
+    notice('');
+    if (!token) return notice('This URL has no session token. Copy the complete URL from the VR-FBT app.', true);
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      return notice('Open the HTTPS phone link shown by Connect phones in the desktop app.', true);
+    }
+    const attempt = ++generation;
+    setRunning(true); state('OPENING CAMERA');
+    try {
+      const deviceId = $('camera').value;
+      const videoConstraints = {
+        width: {ideal: 960}, height: {ideal: 720}, frameRate: {ideal: Number($('fps').value), max: Number($('fps').value)},
+        ...(deviceId ? {deviceId: {exact: deviceId}} : {facingMode: {ideal: 'environment'}}),
+      };
+      const acquired = await navigator.mediaDevices.getUserMedia({audio: false, video: videoConstraints});
+      if (attempt !== generation) { acquired.getTracks().forEach(track => track.stop()); return; }
+      stream = acquired;
+      video.srcObject = stream; await video.play();
+      if (attempt !== generation) return;
+      await refreshCameras().catch(() => {});
+      if (attempt !== generation) return;
+      const cameraLabel = stream.getVideoTracks()[0]?.label;
+      if ($('name').value === 'Phone camera' && cameraLabel) $('name').value = cameraLabel;
+      try { localStorage.setItem('vrfbt-device-name', $('name').value); } catch (_) {}
+      stream.getVideoTracks()[0].addEventListener('ended', () => {
+        if (attempt === generation) { stop(); notice('The camera was interrupted. Tap Start camera to reconnect.', true); }
+      });
+      retries = 0;
+      if (forceWebSocket) {
+        connect(attempt);
+      } else {
+        try {
+          await connectWebRTC(attempt);
+        } catch (directError) {
+          if (attempt === generation) useWebSocketFallback(attempt, directError);
+        }
+      }
+    } catch (error) {
+      if (attempt === generation) { stop(); notice(`${error.name || 'Camera error'}: ${error.message || error}`, true); }
+    }
+  }
 
+  function waitForIce(peerConnection) {
+    if (peerConnection.iceGatheringState === 'complete') return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => { cleanup(); reject(new Error('Local WebRTC negotiation timed out')); }, 8000);
+      const changed = () => { if (peerConnection.iceGatheringState === 'complete') { cleanup(); resolve(); } };
+      const cleanup = () => { clearTimeout(timeout); peerConnection.removeEventListener('icegatheringstatechange', changed); };
+      peerConnection.addEventListener('icegatheringstatechange', changed);
+    });
+  }
 
-		const canvas = document.createElement('canvas');
-		const ctx = canvas.getContext('2d')
+  async function connectWebRTC(attempt) {
+    state('CONNECTING DIRECTLY');
+    const connection = peer = new RTCPeerConnection({iceServers: []});
+    stream.getTracks().forEach(track => connection.addTrack(track, stream));
+    connection.addEventListener('connectionstatechange', () => {
+      if (attempt !== generation || peer !== connection) return;
+      if (connection.connectionState === 'connected') {
+        notice(''); state('DIRECT · LAN', true);
+        clearInterval(statsTimer);
+        statsTimer = setInterval(async () => {
+          let frames = 0;
+          for (const report of (await connection.getStats()).values()) {
+            if (report.type === 'outbound-rtp' && report.kind === 'video') frames = report.framesEncoded || frames;
+          }
+          state(`DIRECT · ${frames}`, true);
+        }, 1000);
+      } else if (['failed', 'closed'].includes(connection.connectionState)) {
+        useWebSocketFallback(attempt, new Error('Direct WebRTC connection ended'));
+      }
+    });
+    await connection.setLocalDescription(await connection.createOffer());
+    await waitForIce(connection);
+    if (attempt !== generation) return;
+    offerController = new AbortController();
+    const query = new URLSearchParams({token, device_id: clientId, name: $('name').value || 'Phone camera'});
+    const response = await fetch(`/api/webrtc/offer?${query}`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, signal: offerController.signal,
+      body: JSON.stringify({sdp: connection.localDescription.sdp, type: connection.localDescription.type}),
+    });
+    if (!response.ok) throw new Error(`PC rejected WebRTC connection (${response.status})`);
+    const answer = await response.json();
+    if (attempt !== generation) return;
+    await connection.setRemoteDescription(answer);
+  }
 
-		vid.onloadedmetadata = () => {
-			setInterval(() => {
-				canvas.width = video.videoWidth;
-				canvas.heigth = video.videoHeigth;
-				ctx.drawImage(video, 0, 0);
-				canvas.toBlob(blob => {
-					blob.arrayBuffer().then(buf => {
-						ws.send(buf);
-					});
-				}, 'image/jpeg', 0.5)
-			}, 16)
-		}
-	</script>
+  function useWebSocketFallback(attempt, reason) {
+    if (attempt !== generation || !stream) return;
+    if (offerController) { offerController.abort(); offerController = null; }
+    const failedPeer = peer; peer = null;
+    if (failedPeer) failedPeer.close();
+    clearInterval(statsTimer); statsTimer = null;
+    $('privacy').textContent = 'LAN compatibility mode: encrypted frames still travel only from this phone to the PC.';
+    notice(`Direct video was unavailable (${reason.message || reason}). Using local-network compatibility mode.`);
+    connect(attempt);
+  }
+
+  function connect(attempt) {
+    if (attempt !== generation || !stream) return;
+    state(retries ? 'RECONNECTING' : 'CONNECTING');
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const query = new URLSearchParams({token, device_id: clientId, name: $('name').value || 'Phone camera'});
+    const ws = socket = new WebSocket(`${protocol}//${location.host}/ws?${query}`);
+    ws.binaryType = 'arraybuffer';
+    connectTimer = setTimeout(() => { if (ws.readyState === WebSocket.CONNECTING) ws.close(); }, 15000);
+    ws.onopen = () => {
+      if (attempt !== generation || socket !== ws) { ws.close(); return; }
+      clearTimeout(connectTimer); retries = 0; notice(''); state('CONNECTED', true); beginSending();
+    };
+    ws.onclose = () => {
+      if (attempt !== generation || socket !== ws) return;
+      clearTimeout(connectTimer); stopSending();
+      if (++retries > 5) {
+        stop(); notice('Connection failed. Check that the phone and PC are on the same local network, then scan the current link again. Close other camera tabs before retrying.', true);
+        return;
+      }
+      state('RECONNECTING');
+      reconnectTimer = setTimeout(() => connect(attempt), Math.min(1000 * 2 ** retries, 10000));
+    };
+    ws.onerror = () => { if (attempt === generation) notice('Connection interrupted. Retrying…'); };
+  }
+
+  function beginSending() {
+    stopSending();
+    timer = setInterval(() => {
+      if (encoding || !socket || socket.readyState !== WebSocket.OPEN || socket.bufferedAmount > 1_000_000 || !video.videoWidth) return;
+      const scale = Math.min(1, 960 / Math.max(video.videoWidth, video.videoHeight));
+      canvas.width = Math.round(video.videoWidth * scale); canvas.height = Math.round(video.videoHeight * scale);
+      context.drawImage(video, 0, 0, canvas.width, canvas.height); encoding = true;
+      const destination = socket, attempt = generation;
+      canvas.toBlob(blob => {
+        if (attempt !== generation) return;
+        encoding = false;
+        if (blob && socket === destination && destination.readyState === WebSocket.OPEN && destination.bufferedAmount < 1_000_000) {
+          destination.send(blob); sent += 1; state(`LIVE · ${sent}`, true);
+        }
+      }, 'image/jpeg', Number($('quality').value));
+    }, 1000 / Number($('fps').value));
+  }
+  function stopSending() { if (timer) clearInterval(timer); timer = null; encoding = false; }
+  function stop() {
+    ++generation;
+    clearTimeout(reconnectTimer); clearTimeout(connectTimer);
+    clearInterval(statsTimer); statsTimer = null;
+    if (offerController) { offerController.abort(); offerController = null; }
+    if (peer) { peer.close(); peer = null; }
+    stopSending();
+    if (socket) { socket.close(1000, 'user stopped'); socket = null; }
+    if (stream) { stream.getTracks().forEach(track => track.stop()); stream = null; }
+    video.srcObject = null; sent = 0; setRunning(false); state('OFFLINE');
+  }
+
+  $('start').addEventListener('click', start); $('stop').addEventListener('click', stop);
+  $('fps').addEventListener('change', () => { if (socket?.readyState === WebSocket.OPEN) beginSending(); });
+  window.addEventListener('pagehide', stop); refreshCameras().catch(() => {});
+  if (!window.isSecureContext) notice('Use the HTTPS link or QR code in the desktop app to enable your camera.', false);
+})();
+</script>
 </body>
 </html>

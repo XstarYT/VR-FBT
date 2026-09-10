@@ -4,10 +4,10 @@ cls
 
 echo Restarting...
 
-timeout 5
+timeout /t 5 /nobreak >nul
 
 cls
 
-if "%1"=="py" start Main.py
+if "%1"=="py" call run.bat
 
-if "%1"=="exe" start Main.exe
+if "%1"=="exe" start "VR-FBT" Main.exe

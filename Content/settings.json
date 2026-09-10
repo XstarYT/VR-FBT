@@ -1,9 +1,7 @@
 {
-	"fps": 30,
-
-	"TCP_server":false,
-	"UDP_server":false,
-	"Live_switch":true,
-
-	"default_profile":"DEFAULT" 
+  "fps": 30,
+  "TCP_server": false,
+  "UDP_server": false,
+  "Live_switch": true,
+  "default_profile": "Default"
 }

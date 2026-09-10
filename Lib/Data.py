@@ -1,97 +1,112 @@
-from numba import njit
-from numba.typed import List
-import math 
+"""Landmark data structures and small filtering helpers."""
 
-#____Obj____
+from __future__ import annotations
+
+import math
+
+
 class keypoint:
-	def __init__(self, pos, vis):
-		self.pos = List(pos)
-		self.vis = vis
+    """A tracked 3D point with visibility and bounded position history."""
 
-		self.his = List()
+    def __init__(self, pos, vis):
+        self.pos = [float(value) for value in pos]
+        self.vis = float(vis)
+        self.his: list[list[float]] = []
 
-	def append_history(self):
-		self.his.append(self.pos)
-		if len(self.his) > 15:
-			self.his = self.his[1:]
+    def append_history(self) -> None:
+        self.his.append(self.pos.copy())
+        del self.his[:-15]
 
-	def update(self, pos, vis):
-		self.pos = List(pos)
-		self.vis = vis
+    def update(self, pos, vis, smoothing: float | None = None) -> None:
+        values = [float(value) for value in pos]
+        if smoothing is not None and self.his:
+            base_alpha = min(max(float(smoothing), 0.0), 1.0)
+            movement = math.sqrt(sum((new - old) ** 2 for new, old in zip(values, self.pos)))
+            # Small changes are stabilized; deliberate movement catches up fast.
+            alpha = min(0.88, base_alpha + movement * 3.0)
+            values = [alpha * new + (1.0 - alpha) * old for new, old in zip(values, self.pos)]
+        self.pos = values
+        self.vis = float(vis)
 
-#____wrappers____
+
 def get_Joint_Map(name, Json_lib):
-	return Json_lib.File.load(f'Content/Joint-Maps/{name}.json')
+    return Json_lib.File.load(f"Content/Joint-Maps/{name}.json")
 
-#____Optimized-Math____
+
 def midpoint(p1, p2):
-	mid = List()
-	mid.append((p1.pos[0]+p2.pos[0])/2)
-	mid.append((p1.pos[1]+p2.pos[1])/2)
-	mid.append((p1.pos[2]+p2.pos[2])/2)
-	return mid
+    return [(left + right) / 2.0 for left, right in zip(p1.pos, p2.pos)]
+
 
 def add(vec1, vec2):
-	new_vec = List()
-	new_vec.append(vec1[0]+vec2[0])
-	new_vec.append(vec1[1]+vec2[1])
-	new_vec.append(vec1[2]+vec2[2])
-	return new_vec
+    return [left + right for left, right in zip(vec1, vec2)]
 
-@njit
+
+def _validate_filter(x, cutoff, fs):
+    if fs <= 0:
+        raise ValueError("sample rate must be positive")
+    if not 0 < cutoff < fs / 2:
+        raise ValueError("cutoff must be between zero and the Nyquist frequency")
+    return [float(value) for value in x]
+
+
 def legendre_lowpass_o2(x, cutoff, fs):
-	omega = math.tan(math.pi * cutoff / fs)
-	c = omega**2
+    values = _validate_filter(x, cutoff, fs)
+    omega = math.tan(math.pi * cutoff / fs)
+    c = omega**2
+    norm = 1 + 1.618 * omega + c
+    a0, a1 = c / norm, 2 * c / norm
+    b1, b2 = 2 * (c - 1) / norm, (1 - 1.618 * omega + c) / norm
+    out = [0.0] * len(values)
+    for i, value in enumerate(values):
+        if i == 0:
+            out[i] = a0 * value
+        elif i == 1:
+            out[i] = a0 * value + a1 * values[i - 1] - b1 * out[i - 1]
+        else:
+            out[i] = a0 * value + a1 * values[i - 1] + a0 * values[i - 2] - b1 * out[i - 1] - b2 * out[i - 2]
+    return out
 
-	norm = 1 + 1.618*omega + c
-	a0 = c / norm
-	a1 = 2*c / norm
-	b1 = 2*(c-1) / norm
-	b2 = (1 - 1.618*omega + c) / norm
 
-	out = List([0.0]*len(x))
-	for i in range(len(x)):
-		if i == 0:
-			out[i] = a0*x[i]
-		elif i == 1:
-			out[i] = a0*x[i] + a1*x[i-1] - b1*out[i-1]
-		else:
-			out[i] = (a0*x[i] + a1*x[i-1] - a0*x[i-2] - b1*out[i-1] - b2*out[i-2])
-
-@njit
 def legendre_highpass_o2(x, cutoff, fs):
-	omega = math.tan(math.pi * cutoff / fs)
-	c = omega**2
+    values = _validate_filter(x, cutoff, fs)
+    omega = math.tan(math.pi * cutoff / fs)
+    c = omega**2
+    norm = 1 + 1.618 * omega + c
+    a0, a1 = 1 / norm, -2 / norm
+    b1, b2 = 2 * (c - 1) / norm, (1 - 1.618 * omega + c) / norm
+    out = [0.0] * len(values)
+    for i, value in enumerate(values):
+        if i == 0:
+            out[i] = a0 * value
+        elif i == 1:
+            out[i] = a0 * value + a1 * values[i - 1] - b1 * out[i - 1]
+        else:
+            out[i] = a0 * value + a1 * values[i - 1] + a0 * values[i - 2] - b1 * out[i - 1] - b2 * out[i - 2]
+    return out
 
-	norm = 1 + 1.618*omega + c
-	a0 = 1 / norm
-	a1 = -2 / norm
-	b1 = 2*(c-1) / norm
-	b2 = (1 - 1.618*omega + c) / norm
 
-	out = List([0.0]*len(x))
-	for i in range(len(x)):
-		if i == 0:
-			out[i] = a0*x[i]
-		elif i == 1:
-			out[i] = a0*x[i] + a1*x[i-1] - b1*out[i-1]
-		else:
-			out[i] = (a0*x[i] + a1*x[i-1] - a0*x[i-2] - b1*out[i-1] - b2*out[i-2])
-
-#____Landmark-Mapping____
 class Map:
-	def __init__(self, Joint_Map):
-		self.JMap = Joint_Map
+    def __init__(self, joint_map):
+        self.JMap = joint_map
+        self.Fused: dict[str, keypoint] = {}
+        self.KeyPoints = {name: keypoint([0, 0, 0], 0.0) for name in joint_map["KeyPoints"]}
 
-		self.Fused = {}
+    def Update(self, landmark_list, smooth: bool = False):
+        required_index = max(self.JMap["KeyPoints"].values())
+        if len(landmark_list) <= required_index:
+            raise ValueError(f"Model returned {len(landmark_list)} landmarks; map needs index {required_index}")
+        alpha = 0.28 if smooth else None
+        for name, index in self.JMap["KeyPoints"].items():
+            x, y, z, visibility = landmark_list[index]
+            point = self.KeyPoints[name]
+            if visibility >= 0.35 or not point.his:
+                point.update([x, y, z], visibility, alpha)
+                point.append_history()
+            else:
+                # Do not let an occluded joint's noisy estimate poison the
+                # next visible frame; retain position but expose confidence.
+                point.vis = float(visibility)
 
-		self.KeyPoints = {}
-		for key in self.JMap['KeyPoints']:
-			self.KeyPoints[key] = keypoint([0,0,0], 0.0)
-
-	def Update(self, LandmarkList):
-		for key in self.JMap['KeyPoints']:
-			x,y,z, Vis = LandmarkList[self.JMap['KeyPoints'][key]]
-			self.KeyPoints[key].update([x,y,z], Vis)
-
-			self.KeyPoints[key].append_history()
+    @staticmethod
+    def make_fused(left: keypoint, right: keypoint, correction) -> keypoint:
+        return keypoint(add(midpoint(left, right), correction), (left.vis + right.vis) / 2.0)

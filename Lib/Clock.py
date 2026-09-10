@@ -8,20 +8,18 @@ class delta:
 		delta = 0
 		def __enter__(self):
 			self.d1 = time.perf_counter()
-
-			return delta
+			return self
 
 		def __exit__(self, *arg, **kwarg):
 			d2 = time.perf_counter()
-			delta = max(d2-d1, 0)
+			self.delta = max(d2-self.d1, 0)
 
 	class precClock:
 		delta = 0
 		def __enter__(self):
 			winmm.timeBeginPeriod(1)
 			self.d1 = time.perf_counter()
-
-			return self.delta
+			return self
 
 		def __exit__(self, *arg, **kwarg):
 			d2 = time.perf_counter()

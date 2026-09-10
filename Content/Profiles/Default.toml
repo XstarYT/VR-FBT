@@ -1,15 +1,19 @@
 [server]
-ip="localhost"
-port=9000
+ip = "127.0.0.1"
+port = 9000
 
 [camera]
-cam-index=[0]
-show-output=true
+cam-index = [0]
+source = "phone:200c2735-9348-4681-9a2c-afaa2c54cbe2"
+show-output = true
 
 [tracking]
-mode="single"
-smooth=true
-joint-map='FULLMAP'
+mode = "single"
+smooth = true
+pose-quality = "full"
+user-height-m = 1.750
+vrchat-tracker-set = "stable"
+joint-map = "FULLMAP"
 
 [misc]
-joy-con-remote=false
+joy-con-remote = false

@@ -1,0 +1,12 @@
+opencv-contrib-python==5.0.0.93
+mediapipe==1.0.1
+python-osc>=1.9,<2
+aiohttp>=3.10,<4
+aiortc>=1.15,<2
+cryptography>=43,<47
+pygrabber>=0.2,<1
+qrcode>=8,<9
+Pillow>=10.4,<12
+rich>=13.8,<15
+pywin32>=306
+toml>=0.10,<1
