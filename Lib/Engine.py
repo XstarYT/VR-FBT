@@ -76,15 +76,22 @@ class TrackingController:
             self.callbacks.log("INFO", "Loading the pose model and compute backend…")
             import cv2
             from Lib import Data, OSCKit
-            from Lib.Config import profile_camera_sources
-            from Lib.DebugView import DebugScene3D
+            from Lib.Config import profile_camera_setups, profile_camera_sources
+            from Lib.DebugView import DebugScene3D, render_camera_mosaic
             from Lib.Tracking import CameraObservation, MultiCameraPoseFusion, Pose
             from Lib.VRChat import VRChatPoseSolver
 
             joint_map = load_joint_map(profile.joint_map)
             mapped_pose = Data.Map(joint_map)
             source_ids = profile_camera_sources(profile)
-            fusion = MultiCameraPoseFusion(source_ids, calibration_frames=12)
+            fusion = MultiCameraPoseFusion(
+                source_ids,
+                calibration_frames=12,
+                manual_camera_setup=profile.manual_camera_setup,
+                camera_setups=profile_camera_setups(profile),
+                room_size_m=profile.room_size_m,
+                calibration_duration_seconds=10.0,
+            )
             vrchat_solver = VRChatPoseSolver(profile.user_height_m, calibration_frames=20)
             osc = OSCKit.Server(profile.server_ip, profile.server_port)
             self.callbacks.log("PASS", f"VRChat OSC output resolved to IPv4 {osc.target[0]}:{osc.target[1]}")
@@ -123,14 +130,16 @@ class TrackingController:
             self.callbacks.log("INFO", f"Tracking {len(captures)} camera(s): {source_label}")
             self.callbacks.log("INFO", f"MediaPipe {profile.pose_quality} output to {profile.server_ip}:{profile.server_port}")
             if len(captures) > 1:
-                self.callbacks.log("INFO", "Multi-camera calibration: stand still with your full body visible in every selected camera")
+                self.callbacks.log("INFO", "Multi-camera calibration: hold a T-pose for 10 seconds with your full body visible in every selected camera")
             self.callbacks.log("INFO", "VRChat tracker set: hip + feet (stable)" if tracker_ids else "VRChat tracker set: all 8 (experimental)")
-            debug_scene = DebugScene3D(cv2) if profile.show_output else None
+            debug_scene = DebugScene3D(cv2, room_size_m=profile.room_size_m) if profile.show_output else None
             debug_window = "VR-FBT 3D Tracking Debug"
+            camera_window = "VR-FBT Camera Views"
             if debug_scene is not None:
                 cv2.namedWindow(debug_window, getattr(cv2, "WINDOW_NORMAL", 0))
                 cv2.resizeWindow(debug_window, debug_scene.width, debug_scene.height)
                 cv2.setMouseCallback(debug_window, debug_scene.mouse_callback)
+                cv2.namedWindow(camera_window, getattr(cv2, "WINDOW_NORMAL", 0))
             self.callbacks.state("running")
             camera_calibrated_logged = len(captures) == 1
             missing_sources: set[str] = set()
@@ -139,6 +148,7 @@ class TrackingController:
             while not self._stop_event.is_set():
                 observations = []
                 pending_inference = []
+                camera_views = []
                 for source_id, label, capture in captures:
                     if not capture.isOpened():
                         if source_id not in missing_sources:
@@ -156,10 +166,11 @@ class TrackingController:
                         self.callbacks.log("PASS", f"{label.capitalize()} resumed")
                     height, width = frame.shape[:2]
                     future = inference_pool.submit(poses[source_id].process, frame)
-                    pending_inference.append((source_id, (width, height), future))
-                for source_id, frame_size, future in pending_inference:
+                    pending_inference.append((source_id, label, frame, (width, height), future))
+                for source_id, label, frame, frame_size, future in pending_inference:
                     camera_result = future.result()
                     observations.append(CameraObservation(source_id, camera_result, frame_size))
+                    camera_views.append((frame, camera_result, label))
                 if not observations:
                     if time.perf_counter() - last_any_frame > 3.0:
                         raise RuntimeError("No selected camera has returned a frame for three seconds")
@@ -181,13 +192,13 @@ class TrackingController:
                     calibration_active = True
                     calibration_log_step = -1
                     camera_calibrated_logged = len(captures) == 1
-                    self.callbacks.log("INFO", "Calibrating: stand upright facing the camera with shoulders, hips, knees and feet visible")
+                    self.callbacks.log("INFO", "Calibrating: hold a T-pose with shoulders, wrists, hips, knees and feet visible in every camera")
                     # Re-run this frame through the newly reset fusion state.
                     fusion_result = fusion.update(observations, cv2)
                     result, confidence = fusion_result.pose, fusion_result.pose.confidence
                 if len(captures) > 1 and not fusion_result.calibrated:
                     current, total = fusion_result.calibration_progress
-                    debug_status = f"CAMERA CALIBRATION {current}/{total} — HOLD STILL"
+                    debug_status = f"T-POSE CALIBRATION {current:04.1f}/{total:.0f}s — {fusion_result.calibration_hint}"
                     usable_pose = False
                 else:
                     usable_pose = result.detected and confidence >= 0.35
@@ -244,6 +255,7 @@ class TrackingController:
                         fusion_result.contributing_cameras,
                     )
                     cv2.imshow(debug_window, debug_frame)
+                    cv2.imshow(camera_window, render_camera_mosaic(camera_views, cv2))
                     key = cv2.waitKey(1) & 0xFF
                     if key in (ord("q"), ord("Q")):
                         self._stop_event.set()

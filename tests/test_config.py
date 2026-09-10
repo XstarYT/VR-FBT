@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from Lib.Config import (
+    CameraSetup,
     ConfigurationError,
     Profile,
     Settings,
@@ -40,6 +41,13 @@ class ConfigurationTests(unittest.TestCase):
                 name="Multi Test",
                 camera_source="phone:front",
                 camera_sources=("phone:front", "phone:left", "local:1"),
+                manual_camera_setup=True,
+                camera_setups=(
+                    CameraSetup("phone:front", (0.0, 1.4, -2.5), (0.0, -8.0, 0.0), 65.0),
+                    CameraSetup("phone:left", (2.5, 1.4, 0.0), (-90.0, -8.0, 0.0), 70.0),
+                    CameraSetup("local:1", (-2.5, 1.4, 0.0), (90.0, -8.0, 0.0), 55.0),
+                ),
+                room_size_m=(5.0, 3.0, 6.0),
                 tracking_mode="MULTI",
             )
             save_profile(expected)
@@ -47,6 +55,9 @@ class ConfigurationTests(unittest.TestCase):
             self.assertEqual(loaded.camera_sources, expected.camera_sources)
             self.assertEqual(loaded.camera_source, "phone:front")
             self.assertEqual(loaded.tracking_mode, "MULTI")
+            self.assertTrue(loaded.manual_camera_setup)
+            self.assertEqual(loaded.camera_setups, expected.camera_setups)
+            self.assertEqual(loaded.room_size_m, expected.room_size_m)
 
     def test_invalid_ranges_are_rejected(self):
         with self.assertRaises(ConfigurationError):

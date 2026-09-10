@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from Lib.GUI import VRFBTApp
+from Lib.Config import CameraSetup
 from Lib.RemoteCam import ensure_local_certificates
 
 
@@ -59,6 +60,33 @@ class PhoneGuiTests(unittest.TestCase):
         _, profile = self.app._configuration_from_form()
         self.assertEqual(profile.camera_sources, ('phone:first', 'phone:second'))
         self.assertEqual(profile.tracking_mode, 'MULTI')
+
+    def test_form_preserves_manual_room_and_camera_layout(self):
+        self.app.phone_hub.registry.connect('first', 'Front', 'one')
+        self.app.phone_hub.registry.connect('second', 'Side', 'two')
+        self.app._set_camera_options([])
+        labels = {source: label for label, source in self.app.camera_sources.items()}
+        self.app.camera_choices[0].set(labels['phone:first'])
+        self.app.camera_choices[1].set(labels['phone:second'])
+        self.app.manual_camera_setup.set(True)
+        self.app.room_width.set('5.0'); self.app.room_height.set('3.0'); self.app.room_depth.set('6.0')
+        self.app.camera_setup_values = {
+            'phone:first': CameraSetup('phone:first', (0.0, 1.5, -2.5), (0.0, -5.0, 0.0), 65.0),
+            'phone:second': CameraSetup('phone:second', (2.5, 1.5, 0.0), (-90.0, -5.0, 0.0), 70.0),
+        }
+        _, profile = self.app._configuration_from_form()
+        self.assertTrue(profile.manual_camera_setup)
+        self.assertEqual(profile.room_size_m, (5.0, 3.0, 6.0))
+        self.assertEqual(profile.camera_setups, tuple(self.app.camera_setup_values.values()))
+
+    def test_camera_layout_dialog_opens_for_current_sources(self):
+        before = set(self.app.winfo_children())
+        self.app._show_camera_setup()
+        self.app.update_idletasks()
+        dialogs = [child for child in self.app.winfo_children() if child not in before and child.winfo_class() == 'Toplevel']
+        self.assertEqual(len(dialogs), 1)
+        self.assertEqual(dialogs[0].title(), 'Camera and room layout')
+        dialogs[0].destroy()
 
     def test_vrchat_height_is_read_from_form(self):
         self.app.user_height.set('1.83')

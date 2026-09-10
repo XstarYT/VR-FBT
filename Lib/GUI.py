@@ -8,7 +8,7 @@ import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from Lib.Config import ConfigurationError, Profile, Settings, list_profiles, load_profile, load_settings, profile_camera_sources, run_diagnostics, save_profile, save_settings
+from Lib.Config import CameraSetup, ConfigurationError, Profile, Settings, list_profiles, load_profile, load_settings, profile_camera_setups, profile_camera_sources, run_diagnostics, save_profile, save_settings
 from Lib.Engine import EngineCallbacks, TrackingController
 from Lib.RemoteCam import LocalCamera, RemoteCameraHub, discover_local_cameras, ensure_local_certificates, find_openssl
 
@@ -96,6 +96,10 @@ class VRFBTApp(tk.Tk):
         ]
         self.camera_choice = self.camera_choices[0]  # compatibility for integrations/tests
         self.phone_url = tk.StringVar(value="Phone server is stopped")
+        self.manual_camera_setup = tk.BooleanVar(value=False)
+        self.room_width, self.room_height, self.room_depth = tk.StringVar(value="4.0"), tk.StringVar(value="2.7"), tk.StringVar(value="4.0")
+        self.camera_setup_summary = tk.StringVar(value="Automatic camera calibration · room 4.0 × 2.7 × 4.0 m")
+        self.camera_setup_values: dict[str, CameraSetup] = {}
         self.show_output, self.smooth = tk.BooleanVar(value=True), tk.BooleanVar(value=True)
         self.tracking_mode, self.joint_map = tk.StringVar(value="SINGLE"), tk.StringVar(value="FULLMAP")
         self.pose_quality = tk.StringVar(value="Full — balanced (recommended)")
@@ -138,9 +142,12 @@ class VRFBTApp(tk.Tk):
             self._field(left, "CAMERA 3 — OPTIONAL", self.camera_choices[2], "combo", ["Off"]),
         ]
         self.camera_combo = self.camera_combos[0]  # compatibility for integrations/tests
+        ttk.Label(left, text="Multi-camera startup: hold a full-body T-pose for 10 seconds.", foreground=GOOD, style="Panel.TLabel").pack(anchor="w", pady=(0, 9))
         camera_actions = ttk.Frame(left, style="Panel.TFrame"); camera_actions.pack(fill="x", pady=(0, 13))
         ttk.Button(camera_actions, text="Refresh cameras", command=self._refresh_cameras).pack(side="left")
         self.phone_button = ttk.Button(camera_actions, text="Connect phone on LAN", command=self._start_phone_server); self.phone_button.pack(side="left", padx=8)
+        ttk.Button(camera_actions, text="Camera layout…", command=self._show_camera_setup).pack(side="left")
+        ttk.Label(left, textvariable=self.camera_setup_summary, style="PanelMuted.TLabel", wraplength=430, justify="left").pack(fill="x", pady=(0, 8))
         ttk.Label(left, textvariable=self.phone_url, style="PanelMuted.TLabel", wraplength=430, justify="left").pack(fill="x", pady=(0, 6))
         self.phone_stop_button = ttk.Button(left, text="Stop phone connection", command=self._stop_phone_server, state='disabled')
         self.phone_stop_button.pack(anchor="w", pady=(0, 13))
@@ -150,7 +157,7 @@ class VRFBTApp(tk.Tk):
         self._field(right, "VRCHAT OSC HOST", self.osc_host); self._field(right, "VRCHAT OSC PORT", self.osc_port)
         ttk.Label(right, text="In VRChat: Action Menu → OSC → Enabled", foreground=GOOD, style="Panel.TLabel").pack(anchor="w", pady=(0, 8))
         checks = ttk.Frame(right, style="Panel.TFrame"); checks.pack(fill="x", pady=(14, 24))
-        ttk.Checkbutton(checks, text="Rotatable 3D debug window (cameras + wireframe)", variable=self.show_output).pack(anchor="w", pady=5)
+        ttk.Checkbutton(checks, text="Debug windows (3D room + annotated camera views)", variable=self.show_output).pack(anchor="w", pady=5)
         ttk.Checkbutton(checks, text="Smooth landmark motion", variable=self.smooth).pack(anchor="w", pady=5)
         actions = ttk.Frame(right, style="Panel.TFrame"); actions.pack(fill="x", pady=(10, 0))
         self.start_button = ttk.Button(actions, text="Start tracking", style="Accent.TButton", command=self._start); self.start_button.pack(side="left")
@@ -191,6 +198,10 @@ class VRFBTApp(tk.Tk):
             self.user_height.set(f"{p.user_height_m:.2f}")
             self.pose_quality.set(next((label for label, value in POSE_QUALITY_LABELS.items() if value == p.pose_quality), "Full — balanced (recommended)"))
             self.tracker_set.set(next((label for label, value in TRACKER_SET_LABELS.items() if value == p.vrchat_tracker_set), "Stable — hip + feet (recommended)"))
+            self.manual_camera_setup.set(p.manual_camera_setup)
+            self.room_width.set(f"{p.room_size_m[0]:.2f}"); self.room_height.set(f"{p.room_size_m[1]:.2f}"); self.room_depth.set(f"{p.room_size_m[2]:.2f}")
+            self.camera_setup_values = {setup.source_id: setup for setup in profile_camera_setups(p)}
+            self._update_camera_setup_summary()
             self._select_sources(profile_camera_sources(p))
         except Exception as exc: self._write_log("ERROR", str(exc))
 
@@ -202,9 +213,12 @@ class VRFBTApp(tk.Tk):
         if not sources:
             sources = profile_camera_sources(self.loaded_profile)
         source = sources[0]
+        temporary = Profile(camera_source=source, camera_sources=sources, tracking_mode="MULTI" if len(sources) > 1 else "SINGLE")
+        default_setups = {setup.source_id: setup for setup in profile_camera_setups(temporary)}
+        setups = tuple(self.camera_setup_values.get(item, default_setups[item]) for item in sources)
         camera_index = int(source.split(":", 1)[1]) if source.startswith("local:") else self.loaded_profile.camera_index
         settings = Settings(fps=int(self.fps.get()), default_profile=self.profile_name.get(), tcp_server=self.loaded_settings.tcp_server, udp_server=self.loaded_settings.udp_server, live_switch=self.loaded_settings.live_switch)
-        profile = Profile(name=self.profile_name.get(), server_ip=self.osc_host.get().strip(), server_port=int(self.osc_port.get()), camera_index=camera_index, camera_source=source, camera_sources=sources, show_output=self.show_output.get(), tracking_mode="MULTI" if len(sources) > 1 else "SINGLE", smooth=self.smooth.get(), pose_quality=POSE_QUALITY_LABELS.get(self.pose_quality.get(), "full"), vrchat_tracker_set=TRACKER_SET_LABELS.get(self.tracker_set.get(), "stable"), joint_map=self.joint_map.get(), joy_con_remote=self.loaded_profile.joy_con_remote, user_height_m=float(self.user_height.get()))
+        profile = Profile(name=self.profile_name.get(), server_ip=self.osc_host.get().strip(), server_port=int(self.osc_port.get()), camera_index=camera_index, camera_source=source, camera_sources=sources, manual_camera_setup=self.manual_camera_setup.get(), camera_setups=setups, room_size_m=(float(self.room_width.get()), float(self.room_height.get()), float(self.room_depth.get())), show_output=self.show_output.get(), tracking_mode="MULTI" if len(sources) > 1 else "SINGLE", smooth=self.smooth.get(), pose_quality=POSE_QUALITY_LABELS.get(self.pose_quality.get(), "full"), vrchat_tracker_set=TRACKER_SET_LABELS.get(self.tracker_set.get(), "stable"), joint_map=self.joint_map.get(), joy_con_remote=self.loaded_profile.joy_con_remote, user_height_m=float(self.user_height.get()))
         return settings, profile
 
     def _save(self, quiet=False) -> bool:
@@ -338,6 +352,83 @@ class VRFBTApp(tk.Tk):
             source_id = source_ids[index] if index < len(source_ids) else None
             display = next((name for name, value in self.camera_sources.items() if value == source_id), None)
             choice.set(display if display else (choice.get() if index == 0 else "Off"))
+
+    def _update_camera_setup_summary(self) -> None:
+        mode = "Manual fixed cameras" if self.manual_camera_setup.get() else "Automatic camera calibration"
+        self.camera_setup_summary.set(
+            f"{mode} · room {self.room_width.get()} × {self.room_height.get()} × {self.room_depth.get()} m"
+        )
+
+    def _show_camera_setup(self) -> None:
+        sources = tuple(
+            source for choice in self.camera_choices
+            if choice.get() != "Off" and (source := self.camera_sources.get(choice.get()))
+        ) or profile_camera_sources(self.loaded_profile)
+        defaults = {
+            setup.source_id: setup
+            for setup in profile_camera_setups(Profile(
+                camera_source=sources[0],
+                camera_sources=sources,
+                tracking_mode="MULTI" if len(sources) > 1 else "SINGLE",
+            ))
+        }
+        dialog = tk.Toplevel(self)
+        dialog.title("Camera and room layout")
+        dialog.configure(bg=BG)
+        dialog.transient(self)
+        dialog.grab_set()
+        box = ttk.Frame(dialog, padding=22); box.pack(fill="both", expand=True)
+        ttk.Label(box, text="Tracking room and fixed camera layout", font=("Segoe UI Semibold", 16)).grid(row=0, column=0, columnspan=9, sticky="w", pady=(0, 10))
+        manual = tk.BooleanVar(value=self.manual_camera_setup.get())
+        ttk.Checkbutton(box, text="Use these manual camera transforms (all selected cameras)", variable=manual).grid(row=1, column=0, columnspan=9, sticky="w", pady=(0, 10))
+
+        room_values = [tk.StringVar(value=value.get()) for value in (self.room_width, self.room_height, self.room_depth)]
+        ttk.Label(box, text="ROOM W / H / D (m)", style="Muted.TLabel").grid(row=2, column=0, sticky="w")
+        for column, variable in enumerate(room_values, start=1):
+            ttk.Entry(box, textvariable=variable, width=8).grid(row=2, column=column, padx=4, sticky="ew")
+
+        headings = ("CAMERA", "X", "Y", "Z", "YAW", "PITCH", "ROLL", "H-FOV")
+        for column, heading in enumerate(headings):
+            ttk.Label(box, text=heading, style="Muted.TLabel", font=("Segoe UI Semibold", 8)).grid(row=3, column=column, padx=4, pady=(16, 5), sticky="w")
+        setup_variables = {}
+        for row, source in enumerate(sources, start=4):
+            setup = self.camera_setup_values.get(source, defaults[source])
+            values = [tk.StringVar(value=f"{value:.3f}") for value in (*setup.position, *setup.rotation, setup.horizontal_fov)]
+            setup_variables[source] = values
+            ttk.Label(box, text=f"CAM {row - 3} · {source.split(':', 1)[-1][:18]}").grid(row=row, column=0, padx=4, pady=5, sticky="w")
+            for column, variable in enumerate(values, start=1):
+                ttk.Entry(box, textvariable=variable, width=9).grid(row=row, column=column, padx=4, pady=5, sticky="ew")
+
+        ttk.Label(
+            box,
+            text="Coordinates use the room center as X=0, Z=0 and the floor as Y=0.\nYaw 0° looks toward +Z; yaw -90° looks toward -X. Pitch tilts vertically. FOV is the camera's horizontal field of view.",
+            style="Muted.TLabel",
+            justify="left",
+        ).grid(row=8, column=0, columnspan=9, sticky="w", pady=(14, 10))
+
+        def apply_layout():
+            try:
+                room = tuple(float(value.get()) for value in room_values)
+                if not (1.0 <= room[0] <= 20.0 and 1.8 <= room[1] <= 6.0 and 1.0 <= room[2] <= 20.0):
+                    raise ValueError("Room must be 1–20 m wide/deep and 1.8–6 m high")
+                setups = {}
+                for source, variables in setup_variables.items():
+                    numbers = [float(variable.get()) for variable in variables]
+                    if not 25.0 <= numbers[6] <= 120.0:
+                        raise ValueError("Horizontal FOV must be between 25° and 120°")
+                    setups[source] = CameraSetup(source, tuple(numbers[:3]), tuple(numbers[3:6]), numbers[6])
+            except ValueError as exc:
+                messagebox.showerror("Invalid camera layout", str(exc), parent=dialog)
+                return
+            self.manual_camera_setup.set(manual.get())
+            self.room_width.set(f"{room[0]:.2f}"); self.room_height.set(f"{room[1]:.2f}"); self.room_depth.set(f"{room[2]:.2f}")
+            self.camera_setup_values.update(setups)
+            self._update_camera_setup_summary()
+            dialog.destroy()
+
+        actions = ttk.Frame(box); actions.grid(row=9, column=0, columnspan=9, sticky="e", pady=(8, 0))
+        ttk.Button(actions, text="Cancel", command=dialog.destroy).pack(side="left", padx=6)
+        ttk.Button(actions, text="Apply layout", style="Accent.TButton", command=apply_layout).pack(side="left")
 
     def _start_phone_server(self) -> None:
         if self.primary_phone_url and self.phone_hub.running:

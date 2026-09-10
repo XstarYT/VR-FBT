@@ -6,6 +6,8 @@ port = 9000
 cam-index = [0]
 source = "phone:b101ebe2-d5eb-481b-a098-470d38707ccb"
 sources = ["phone:b101ebe2-d5eb-481b-a098-470d38707ccb"]
+manual-setup = false
+room-size-m = [4.0, 2.7, 4.0]
 show-output = true
 
 [tracking]

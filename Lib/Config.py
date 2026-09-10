@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import hashlib
 from importlib.util import find_spec
 import json
+import math
 from pathlib import Path
 import sys
 import tempfile
@@ -44,6 +45,14 @@ class Settings:
     live_switch: bool = True
 
 
+@dataclass(frozen=True, slots=True)
+class CameraSetup:
+    source_id: str
+    position: tuple[float, float, float]
+    rotation: tuple[float, float, float]  # yaw, pitch, roll in degrees
+    horizontal_fov: float = 60.0
+
+
 @dataclass(slots=True)
 class Profile:
     name: str = "Default"
@@ -52,6 +61,9 @@ class Profile:
     camera_index: int = 0
     camera_source: str = "local:0"
     camera_sources: tuple[str, ...] = ()
+    manual_camera_setup: bool = False
+    camera_setups: tuple[CameraSetup, ...] = ()
+    room_size_m: tuple[float, float, float] = (4.0, 2.7, 4.0)
     show_output: bool = True
     tracking_mode: str = "SINGLE"
     smooth: bool = True
@@ -139,6 +151,25 @@ def load_profile(name: str) -> Profile:
         if not isinstance(raw_sources, list) or not raw_sources:
             raise ConfigurationError("camera.sources must contain between one and three sources")
         sources = tuple(str(value) for value in raw_sources)
+        raw_room_size = camera.get("room-size-m", [4.0, 2.7, 4.0])
+        if not isinstance(raw_room_size, list) or len(raw_room_size) != 3:
+            raise ConfigurationError("camera.room-size-m must contain width, height, and depth")
+        raw_setups = camera.get("setup", [])
+        if not isinstance(raw_setups, list):
+            raise ConfigurationError("camera.setup must be an array of camera tables")
+        setups = []
+        for entry in raw_setups:
+            entry = _require_mapping(entry, "camera.setup entry")
+            position = entry.get("position", [0.0, 1.4, -2.5])
+            rotation = entry.get("rotation", [0.0, 0.0, 0.0])
+            if not isinstance(position, list) or len(position) != 3 or not isinstance(rotation, list) or len(rotation) != 3:
+                raise ConfigurationError("Each camera setup needs three-value position and rotation arrays")
+            setups.append(CameraSetup(
+                str(entry.get("source", "")),
+                tuple(float(value) for value in position),
+                tuple(float(value) for value in rotation),
+                float(entry.get("horizontal-fov", 60.0)),
+            ))
         profile = Profile(
             name=path.stem,
             server_ip=str(server.get("ip", "127.0.0.1")),
@@ -146,6 +177,9 @@ def load_profile(name: str) -> Profile:
             camera_index=int(indices[0]),
             camera_source=sources[0],
             camera_sources=sources,
+            manual_camera_setup=bool(camera.get("manual-setup", False)),
+            camera_setups=tuple(setups),
+            room_size_m=tuple(float(value) for value in raw_room_size),
             show_output=bool(camera.get("show-output", True)),
             tracking_mode=str(tracking.get("mode", "single")).upper(),
             smooth=bool(tracking.get("smooth", True)),
@@ -167,8 +201,9 @@ def save_profile(profile: Profile) -> None:
     if not safe_name or safe_name != profile.name.strip():
         raise ConfigurationError("Profile name may only contain letters, numbers, spaces, - and _")
     sources = profile_camera_sources(profile)
+    setups = profile_camera_setups(profile)
     local_indices = [int(source.split(":", 1)[1]) for source in sources if source.startswith("local:")]
-    text = (
+    camera_text = (
         "[server]\n"
         f"ip = {json.dumps(profile.server_ip)}\n"
         f"port = {profile.server_port}\n\n"
@@ -176,7 +211,19 @@ def save_profile(profile: Profile) -> None:
         f"cam-index = {json.dumps(local_indices or [profile.camera_index])}\n"
         f"source = {json.dumps(sources[0])}\n"
         f"sources = {json.dumps(list(sources))}\n"
+        f"manual-setup = {str(profile.manual_camera_setup).lower()}\n"
+        f"room-size-m = {json.dumps(list(profile.room_size_m))}\n"
         f"show-output = {str(profile.show_output).lower()}\n\n"
+    )
+    setup_text = "".join(
+            "[[camera.setup]]\n"
+            f"source = {json.dumps(setup.source_id)}\n"
+            f"position = {json.dumps(list(setup.position))}\n"
+            f"rotation = {json.dumps(list(setup.rotation))}\n"
+            f"horizontal-fov = {setup.horizontal_fov:.3f}\n\n"
+            for setup in setups
+    )
+    tracking_text = (
         "[tracking]\n"
         f"mode = {json.dumps(profile.tracking_mode.lower())}\n"
         f"smooth = {str(profile.smooth).lower()}\n"
@@ -187,6 +234,7 @@ def save_profile(profile: Profile) -> None:
         "\n[misc]\n"
         f"joy-con-remote = {str(profile.joy_con_remote).lower()}\n"
     )
+    text = camera_text + setup_text + tracking_text
     _atomic_write(PROFILES_DIR / f"{safe_name}.toml", text)
 
 
@@ -225,6 +273,25 @@ def validate_profile(profile: Profile) -> None:
     expected_mode = "MULTI" if len(sources) > 1 else "SINGLE"
     if profile.tracking_mode != expected_mode:
         raise ConfigurationError(f"Tracking mode must be {expected_mode} for {len(sources)} selected camera(s)")
+    try:
+        room_width, room_height, room_depth = (float(value) for value in profile.room_size_m)
+    except (TypeError, ValueError) as exc:
+        raise ConfigurationError("Room size must contain width, height, and depth") from exc
+    if not all(math.isfinite(value) for value in (room_width, room_height, room_depth)):
+        raise ConfigurationError("Room size values must be finite")
+    if not (1.0 <= room_width <= 20.0 and 1.8 <= room_height <= 6.0 and 1.0 <= room_depth <= 20.0):
+        raise ConfigurationError("Room size must be 1–20 m wide/deep and 1.8–6 m high")
+    setups = profile_camera_setups(profile)
+    if profile.manual_camera_setup and {setup.source_id for setup in setups} != set(sources):
+        raise ConfigurationError("Manual setup must define every selected camera")
+    for setup in setups:
+        if setup.source_id not in sources:
+            raise ConfigurationError(f"Camera setup references an unselected source: {setup.source_id}")
+        values = (*setup.position, *setup.rotation, setup.horizontal_fov)
+        if not all(math.isfinite(float(value)) for value in values):
+            raise ConfigurationError("Camera setup values must be finite")
+        if not 25.0 <= setup.horizontal_fov <= 120.0:
+            raise ConfigurationError("Camera horizontal FOV must be between 25 and 120 degrees")
     if profile.pose_quality not in {"lite", "full", "heavy"}:
         raise ConfigurationError("Pose quality must be lite, full, or heavy")
     if not 1.0 <= profile.user_height_m <= 2.5:
@@ -237,6 +304,21 @@ def validate_profile(profile: Profile) -> None:
 def profile_camera_sources(profile: Profile) -> tuple[str, ...]:
     """Return the ordered sources while remaining compatible with old profiles."""
     return tuple(profile.camera_sources) if profile.camera_sources else (profile.camera_source,)
+
+
+def profile_camera_setups(profile: Profile) -> tuple[CameraSetup, ...]:
+    """Return one editable setup per selected camera, filling sensible room defaults."""
+    sources = profile_camera_sources(profile)
+    existing = {setup.source_id: setup for setup in profile.camera_setups}
+    defaults = (
+        ((0.0, 1.4, -2.5), (0.0, -8.0, 0.0)),
+        ((2.5, 1.4, 0.0), (-90.0, -8.0, 0.0)),
+        ((-2.5, 1.4, 0.0), (90.0, -8.0, 0.0)),
+    )
+    return tuple(
+        existing.get(source, CameraSetup(source, defaults[index][0], defaults[index][1], 60.0))
+        for index, source in enumerate(sources)
+    )
 
 
 def load_joint_map(name: str) -> dict:

@@ -4,8 +4,8 @@ import unittest
 import cv2
 import numpy as np
 
-from Lib.DebugView import DebugScene3D, project_landmarks, render_tracking_debug
-from Lib.Tracking import CameraPose
+from Lib.DebugView import DebugScene3D, project_landmarks, render_camera_mosaic, render_tracking_debug
+from Lib.Tracking import CameraPose, PoseResult
 
 
 class TrackingDebugViewTests(unittest.TestCase):
@@ -61,6 +61,14 @@ class TrackingDebugViewTests(unittest.TestCase):
         self.assertNotEqual(scene.yaw, original_yaw)
         scene.reset_world()
         self.assertIsNone(scene._world_center)
+
+    def test_camera_mosaic_restores_all_annotated_views(self):
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        landmarks = [[0.5, 0.5, 0.0, 0.9] for _ in range(31)]
+        pose = PoseResult(True, 0.9, landmarks, landmarks)
+        mosaic = render_camera_mosaic([(frame, pose, "front"), (frame, pose, "side")], cv2, (320, 240))
+        self.assertEqual(mosaic.shape, (240, 640, 3))
+        self.assertGreater(np.count_nonzero(mosaic), 1000)
 
 
 if __name__ == "__main__":

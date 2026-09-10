@@ -111,10 +111,37 @@ def render_tracking_debug(
     return canvas
 
 
+def render_camera_mosaic(camera_views, cv2, tile_size: tuple[int, int] = (420, 300)):
+    """Render the original annotated camera view for every active source."""
+    import numpy as np
+
+    tile_width, tile_height = tile_size
+    tiles = []
+    for frame, pose, label in camera_views:
+        overlay = render_tracking_debug(
+            frame,
+            pose.image_landmarks,
+            pose.confidence,
+            0.0,
+            0,
+            label,
+            cv2,
+            detected=pose.detected,
+        )
+        scale = min(tile_width / overlay.shape[1], tile_height / overlay.shape[0])
+        resized = cv2.resize(overlay, (max(1, round(overlay.shape[1] * scale)), max(1, round(overlay.shape[0] * scale))))
+        tile = np.full((tile_height, tile_width, 3), (18, 13, 8), dtype=np.uint8)
+        x = (tile_width - resized.shape[1]) // 2
+        y = (tile_height - resized.shape[0]) // 2
+        tile[y:y + resized.shape[0], x:x + resized.shape[1]] = resized
+        tiles.append(tile)
+    return np.hstack(tiles) if tiles else np.zeros((tile_height, tile_width, 3), dtype=np.uint8)
+
+
 class DebugScene3D:
     """Rotatable OpenCV 3D scene for fused landmarks and camera poses."""
 
-    def __init__(self, cv2_module, width: int = 960, height: int = 640):
+    def __init__(self, cv2_module, width: int = 960, height: int = 640, room_size_m=(4.0, 2.7, 4.0)):
         self.cv2 = cv2_module
         self.width, self.height = int(width), int(height)
         self.yaw, self.pitch, self.zoom = -28.0, -16.0, 155.0
@@ -122,6 +149,7 @@ class DebugScene3D:
         self._last_mouse = (0, 0)
         self._world_center = None
         self._floor_y = None
+        self.room_size_m = tuple(float(value) for value in room_size_m)
 
     def mouse_callback(self, event, x, y, flags, _parameter=None) -> None:
         cv2 = self.cv2
@@ -190,14 +218,30 @@ class DebugScene3D:
         rotation = self._rotation()
 
         floor_y = self._floor_y
+        room_width, room_height, room_depth = self.room_size_m
         grid_color = (48, 43, 37)
-        for step in range(-6, 7):
+        for fraction in np.linspace(-0.5, 0.5, 11):
             for first, second in (
-                ((step * 0.5, floor_y, -3.0), (step * 0.5, floor_y, 3.0)),
-                ((-3.0, floor_y, step * 0.5), (3.0, floor_y, step * 0.5)),
+                ((fraction * room_width, floor_y, -room_depth / 2), (fraction * room_width, floor_y, room_depth / 2)),
+                ((-room_width / 2, floor_y, fraction * room_depth), (room_width / 2, floor_y, fraction * room_depth)),
             ):
                 a, b = self._project(first, center, rotation), self._project(second, center, rotation)
                 cv2.line(canvas, a[:2], b[:2], grid_color, 1, cv2.LINE_AA)
+        floor_corners = [
+            (-room_width / 2, floor_y, -room_depth / 2),
+            (room_width / 2, floor_y, -room_depth / 2),
+            (room_width / 2, floor_y, room_depth / 2),
+            (-room_width / 2, floor_y, room_depth / 2),
+        ]
+        ceiling_corners = [(x, floor_y + room_height, z) for x, _y, z in floor_corners]
+        room_color = (88, 72, 58)
+        for corners in (floor_corners, ceiling_corners):
+            projected = [self._project(point, center, rotation) for point in corners]
+            for first, second in zip(projected, projected[1:] + projected[:1]):
+                cv2.line(canvas, first[:2], second[:2], room_color, 2, cv2.LINE_AA)
+        for lower, upper in zip(floor_corners, ceiling_corners):
+            a, b = self._project(lower, center, rotation), self._project(upper, center, rotation)
+            cv2.line(canvas, a[:2], b[:2], room_color, 2, cv2.LINE_AA)
 
         axis_origin = (0.0, floor_y, 0.0)
         for endpoint, color, label in (
