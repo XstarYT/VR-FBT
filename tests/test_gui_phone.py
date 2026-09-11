@@ -1,3 +1,4 @@
+import gc
 import tempfile
 import time
 import unittest
@@ -5,8 +6,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from Lib.GUI import VRFBTApp
-from Lib.Config import CameraSetup
-from Lib.RemoteCam import ensure_local_certificates
+from Lib.Config import CameraSetup, Profile
+from Lib.RemoteCam import LocalCamera, ensure_local_certificates
 
 
 class PhoneGuiTests(unittest.TestCase):
@@ -19,6 +20,11 @@ class PhoneGuiTests(unittest.TestCase):
 
     def tearDown(self):
         self.app._on_close()
+        # Engine callbacks close over the app; collect that cycle while Tcl is
+        # still being exercised on the test's main thread rather than during a
+        # later asyncio server test.
+        self.app = None
+        gc.collect()
         self.scan.stop()
 
     def test_local_connection_shows_one_camera_qr_and_stops_cleanly(self):
@@ -48,6 +54,29 @@ class PhoneGuiTests(unittest.TestCase):
         self.app._set_camera_options([])
         self.assertIn('phone:first', self.app.camera_sources.values())
         self.assertIn('phone:second', self.app.camera_sources.values())
+
+    def test_identically_named_local_cameras_have_stable_distinct_labels(self):
+        self.app._set_camera_options([
+            LocalCamera(0, "USB Camera"), LocalCamera(1, "USB Camera"),
+        ])
+        labels = {source: label for label, source in self.app.camera_sources.items()}
+        self.assertIn("local:0", labels)
+        self.assertIn("local:1", labels)
+        self.assertNotEqual(labels["local:0"], labels["local:1"])
+        self.assertIn("local:0", labels["local:0"])
+        self.assertIn("local:1", labels["local:1"])
+
+    def test_profile_sources_are_rebuilt_and_selected_even_when_offline(self):
+        sources = ("phone:saved-offline", "local:8")
+        self.app.loaded_profile = Profile(
+            camera_source=sources[0], camera_sources=sources, tracking_mode="MULTI",
+        )
+        self.app._set_camera_options([], sources)
+        selected = tuple(
+            self.app.camera_sources.get(choice.get())
+            for choice in self.app.camera_choices[:2]
+        )
+        self.assertEqual(selected, sources)
 
     def test_form_selects_up_to_three_camera_sources(self):
         self.app.phone_hub.registry.connect('first', 'Front', 'one')

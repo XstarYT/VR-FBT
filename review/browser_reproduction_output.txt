@@ -1,0 +1,2 @@
+PASS F12 FPS control: selecting 10 FPS applies new constraints to the active direct-video track
+PASS F11 WebRTC timeout: a permanently connecting peer reaches compatibility fallback on the complete-attempt deadline

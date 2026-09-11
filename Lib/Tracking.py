@@ -30,6 +30,9 @@ class PoseResult:
     confidence: float
     image_landmarks: list[list[float]]
     world_landmarks: list[list[float]]
+    # MediaPipe's camera-axis landmarks are retained for projection geometry.
+    # ``world_landmarks`` remains the public VR-FBT/Unity representation.
+    camera_world_landmarks: list[list[float]] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +42,7 @@ class CameraObservation:
     source_id: str
     pose: PoseResult
     frame_size: tuple[int, int]  # width, height
+    captured_at: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +66,7 @@ class FusionResult:
     calibration_progress: tuple[float, float]
     contributing_cameras: int
     calibration_hint: str = ""
+    room_floor: float | None = None
 
 
 class MultiCameraPoseFusion:
@@ -120,8 +125,7 @@ class MultiCameraPoseFusion:
         if len(self.source_ids) == 1:
             return self.calibration_frames, self.calibration_frames
         if self.calibration_duration_seconds is not None:
-            elapsed = 0.0 if self._calibration_started_at is None else max(0.0, self._clock() - self._calibration_started_at)
-            return min(elapsed, self.calibration_duration_seconds), self.calibration_duration_seconds
+            return min(self._calibration_valid_elapsed, self.calibration_duration_seconds), self.calibration_duration_seconds
         if self.manual_camera_setup:
             return self.calibration_frames, self.calibration_frames
         count = min((len(self._pose_samples.get(source, ())) for source in self.source_ids), default=0)
@@ -134,11 +138,16 @@ class MultiCameraPoseFusion:
         self._calibration_stats: dict[str, tuple[int, float]] = {}
         self._alignments: dict[str, tuple[object, float, object]] = {}
         self._last_points: dict[int, tuple[float, float, float]] = {}
+        self._last_point_times: dict[int, float] = {}
         self._last_body_transform = None
+        self._single_anchor_extrinsic = None
+        self._single_body_transform = None
+        self._extrinsics_camera_basis = False
         self._room_floor = 0.0 if self.manual_camera_setup else None
         self._session_calibrated = False
         self._calibration_started_at = None
         self._last_valid_calibration_at = None
+        self._calibration_valid_elapsed = 0.0
         self._calibration_hint = "Stand in a T-pose where every camera sees your full body"
 
     def update(self, observations: Sequence[CameraObservation], cv2_module) -> FusionResult:
@@ -148,28 +157,26 @@ class MultiCameraPoseFusion:
             and len(item.pose.image_landmarks) >= 31 and len(item.pose.world_landmarks) >= 31
         ]
         usable.sort(key=lambda item: self.source_ids.index(item.source_id))
+        if len(self.source_ids) > 1 and not self.calibrated:
+            # Missing observations are part of the calibration state machine;
+            # returning before this call used to credit dropout time.
+            self._observe_calibration(usable, cv2_module)
         if not usable:
             empty = PoseResult(False, 0.0, [], [])
-            return FusionResult(empty, self._camera_poses(), self.calibrated, self.calibration_progress, 0, self._calibration_hint)
+            return FusionResult(empty, self._camera_poses(), self.calibrated, self.calibration_progress, 0, self._calibration_hint, self._room_floor)
 
         if len(self.source_ids) == 1:
-            if self.manual_camera_setup:
-                camera_poses = self._camera_poses()
-            else:
-                solved = self._solve_camera(usable[0].pose.world_landmarks, usable[0], cv2_module)
-                camera_poses = self._camera_poses({usable[0].source_id: solved} if solved else None)
-            return FusionResult(usable[0].pose, camera_poses, True, self.calibration_progress, 1, "")
+            localized = self._localize_single_camera(usable[0], cv2_module)
+            return FusionResult(localized, self._camera_poses(), True, self.calibration_progress, 1, "", self._room_floor)
 
-        if not self.calibrated:
-            self._observe_calibration(usable, cv2_module)
         camera_poses = self._camera_poses()
         if not self.calibrated:
             # Preserve the proven single-view path while neutral-pose camera
             # calibration gathers enough stable samples.
-            return FusionResult(usable[0].pose, camera_poses, False, self.calibration_progress, 1, self._calibration_hint)
+            return FusionResult(usable[0].pose, camera_poses, False, self.calibration_progress, 1, self._calibration_hint, self._room_floor)
 
         fused = self._triangulate(usable, cv2_module)
-        return FusionResult(fused, camera_poses, True, self.calibration_progress, len(usable), "")
+        return FusionResult(fused, camera_poses, True, self.calibration_progress, len(usable), "", self._room_floor)
 
     def _camera_matrix(self, size, np, source_id: str | None = None):
         width, height = size
@@ -225,11 +232,99 @@ class MultiCameraPoseFusion:
                 )
             projected, _ = cv2_module.projectPoints(object_points[selected], rvec, tvec, matrix, distortion)
             error = float(np.linalg.norm(projected.reshape(-1, 2) - image_points[selected], axis=1).mean())
+            rotation, _ = cv2_module.Rodrigues(rvec)
+            depths = (rotation @ object_points[selected].T).T[:, 2] + float(np.asarray(tvec).reshape(3)[2])
         except Exception:
             return None
-        if not math.isfinite(error) or error > 18.0:
+        if not math.isfinite(error) or error > 18.0 or np.any(depths <= 1e-4):
             return None
         return rvec.reshape(3), tvec.reshape(3), error
+
+    def _localize_single_camera(self, observation, cv2_module) -> PoseResult:
+        """Recover room translation while keeping a one-camera rig stationary."""
+        import numpy as np
+
+        pose = observation.pose
+        camera_landmarks = pose.camera_world_landmarks or pose.world_landmarks
+        geometry_pose = PoseResult(
+            pose.detected, pose.confidence, pose.image_landmarks, camera_landmarks,
+            pose.camera_world_landmarks,
+        )
+        geometry_observation = CameraObservation(
+            observation.source_id, geometry_pose, observation.frame_size, observation.captured_at,
+        )
+        solved = self._solve_camera(camera_landmarks, geometry_observation, cv2_module)
+        transform = None
+        if solved is not None:
+            rvec, body_to_camera_translation, error = solved
+            body_to_camera_translation = np.asarray(body_to_camera_translation, dtype=np.float64).reshape(3)
+            source = observation.source_id
+            if self.manual_camera_setup:
+                _world_to_camera, _camera_translation, camera_to_world, camera_position = self._manual_camera_geometry(
+                    self.camera_setups[source], np,
+                )
+                # MediaPipe world landmarks are already expressed in the
+                # camera's axes. PnP is used for the missing body translation;
+                # applying its often ambiguous human-pose rotation can mirror
+                # a nearly planar skeleton through the room.
+                world_rotation = camera_to_world
+                world_translation = camera_position + camera_to_world @ body_to_camera_translation
+            else:
+                if self._single_anchor_extrinsic is None:
+                    self._single_anchor_extrinsic = (rvec.copy(), body_to_camera_translation.copy(), error)
+                    self._extrinsics[source] = self._single_anchor_extrinsic
+                    self._extrinsics_camera_basis = pose.camera_world_landmarks is not None
+                    self._calibration_stats[source] = (1, 0.0)
+                anchor_rvec, anchor_translation, _anchor_error = self._single_anchor_extrinsic
+                if pose.camera_world_landmarks is not None:
+                    # Anchor converted MediaPipe input in the historical Unity
+                    # basis while solving PnP entirely in camera axes.
+                    world_rotation = -np.eye(3)
+                    world_translation = -(
+                        body_to_camera_translation - np.asarray(anchor_translation, dtype=np.float64).reshape(3)
+                    )
+                else:
+                    # Synthetic/integration callers may already supply their
+                    # chosen world convention directly.
+                    anchor_rotation, _ = cv2_module.Rodrigues(np.asarray(anchor_rvec, dtype=np.float64))
+                    world_rotation = anchor_rotation.T
+                    world_translation = anchor_rotation.T @ (
+                        body_to_camera_translation - np.asarray(anchor_translation, dtype=np.float64).reshape(3)
+                    )
+
+            points = np.asarray([landmark[:3] for landmark in camera_landmarks], dtype=np.float64)
+            candidate = (world_rotation @ points.T).T + world_translation
+            torso_center = np.median(candidate[[11, 12, 23, 24]], axis=0)
+            room_width, room_height, room_depth = self.room_size_m
+            plausible = np.isfinite(candidate).all()
+            if self.manual_camera_setup:
+                plausible = plausible and (
+                    abs(torso_center[0]) <= room_width / 2.0 + 0.75
+                    and -0.75 <= torso_center[1] <= room_height + 0.75
+                    and abs(torso_center[2]) <= room_depth / 2.0 + 0.75
+                )
+            if plausible:
+                transform = world_rotation, world_translation
+
+        if transform is None:
+            transform = self._single_body_transform
+        if transform is None:
+            transform = np.eye(3), np.zeros(3)
+        elif self._single_body_transform is not None and solved is not None:
+            # Translation is the part most affected by approximate phone FOV.
+            # A light filter removes PnP shake without pinning room movement.
+            _previous_rotation, previous_translation = self._single_body_transform
+            rotation, translation = transform
+            translation = previous_translation * 0.65 + translation * 0.35
+            transform = rotation, translation
+        self._single_body_transform = transform
+
+        rotation, translation = transform
+        localized = []
+        for landmark in camera_landmarks:
+            point = rotation @ np.asarray(landmark[:3], dtype=np.float64) + translation
+            localized.append([*(float(value) for value in point), float(landmark[3])])
+        return PoseResult(pose.detected, pose.confidence, pose.image_landmarks, localized)
 
     @staticmethod
     def _similarity(source, target):
@@ -277,6 +372,20 @@ class MultiCameraPoseFusion:
                 return False
         return True
 
+    def _geometry_landmarks(self, observation, np):
+        """Return body-centred landmarks in the basis used by projection geometry."""
+        pose = observation.pose
+        landmarks = pose.camera_world_landmarks or pose.world_landmarks
+        if pose.camera_world_landmarks is None or not self.manual_camera_setup:
+            return landmarks
+        _world_to_camera, _translation, camera_to_world, _position = self._manual_camera_geometry(
+            self.camera_setups[observation.source_id], np,
+        )
+        return [
+            [*(float(value) for value in (camera_to_world @ np.asarray(item[:3], dtype=np.float64))), float(item[3])]
+            for item in landmarks
+        ]
+
     def _clear_calibration_samples(self) -> None:
         self._pose_samples.clear()
         self._alignment_samples.clear()
@@ -284,6 +393,8 @@ class MultiCameraPoseFusion:
             self._extrinsics.clear()
             self._calibration_stats.clear()
         self._calibration_started_at = None
+        self._last_valid_calibration_at = None
+        self._calibration_valid_elapsed = 0.0
 
     def _finalize_alignments(self, np) -> None:
         for source in self.source_ids:
@@ -304,6 +415,10 @@ class MultiCameraPoseFusion:
         import numpy as np
 
         now = self._clock()
+        if not observations and self.calibration_duration_seconds is None:
+            self._calibration_hint = "Waiting for every camera to see a pose"
+            self._clear_calibration_samples()
+            return
         if self.calibration_duration_seconds is not None:
             present = {observation.source_id for observation in observations}
             if present != set(self.source_ids):
@@ -317,27 +432,36 @@ class MultiCameraPoseFusion:
                 if self._last_valid_calibration_at is None or now - self._last_valid_calibration_at > 0.75:
                     self._clear_calibration_samples()
                 return
+            if self._last_valid_calibration_at is not None:
+                gap = max(0.0, now - self._last_valid_calibration_at)
+                if gap > 0.75:
+                    self._clear_calibration_samples()
+                else:
+                    self._calibration_valid_elapsed += min(gap, 0.25)
             if self._calibration_started_at is None:
                 self._calibration_started_at = now
             self._last_valid_calibration_at = now
-            remaining = max(0.0, self.calibration_duration_seconds - (now - self._calibration_started_at))
+            remaining = max(0.0, self.calibration_duration_seconds - self._calibration_valid_elapsed)
             self._calibration_hint = f"Hold the T-pose for {remaining:.1f} more seconds"
 
         reference = observations[0]
-        reference_world = reference.pose.world_landmarks
+        reference_world = self._geometry_landmarks(reference, np)
+        if not self.manual_camera_setup and reference.pose.camera_world_landmarks is not None:
+            self._extrinsics_camera_basis = True
         solved_this_frame: dict[str, tuple[object, object, float] | None] = {}
+        alignments_this_frame: dict[str, tuple[object, float, object]] = {}
         for observation in observations:
             solved = None if self.manual_camera_setup else self._solve_camera(reference_world, observation, cv2_module)
             if not self.manual_camera_setup and solved is None:
                 continue
             solved_this_frame[observation.source_id] = solved
             source_points, target_points = [], []
-            for source, target in zip(observation.pose.world_landmarks, reference_world):
+            for source, target in zip(self._geometry_landmarks(observation, np), reference_world):
                 if min(float(source[3]), float(target[3])) >= 0.55:
                     source_points.append(source[:3]); target_points.append(target[:3])
             alignment = self._similarity(source_points, target_points)
             if alignment is not None:
-                self._alignment_samples.setdefault(observation.source_id, []).append(alignment)
+                alignments_this_frame[observation.source_id] = alignment
         if any(source not in solved_this_frame for source in self.source_ids):
             self._calibration_hint = "Could not localize every camera; check framing and FOV"
             return
@@ -345,6 +469,10 @@ class MultiCameraPoseFusion:
             self.calibration_frames,
             round((self.calibration_duration_seconds or 0.0) * 60.0),
         )
+        for source, alignment in alignments_this_frame.items():
+            samples = self._alignment_samples.setdefault(source, [])
+            samples.append(alignment)
+            del samples[:-sample_limit]
         if not self.manual_camera_setup:
             for source, sample in solved_this_frame.items():
                 samples = self._pose_samples.setdefault(source, [])
@@ -357,8 +485,7 @@ class MultiCameraPoseFusion:
         )
         duration_complete = (
             self.calibration_duration_seconds is None
-            or self._calibration_started_at is not None
-            and now - self._calibration_started_at >= self.calibration_duration_seconds
+            or self._calibration_valid_elapsed >= self.calibration_duration_seconds
         )
         if not enough_samples or not duration_complete:
             return
@@ -449,6 +576,9 @@ class MultiCameraPoseFusion:
             rotation, _ = cv2.Rodrigues(np.asarray(rvec, dtype=np.float64))
             camera_to_world = rotation.T
             position = -camera_to_world @ np.asarray(tvec, dtype=np.float64).reshape(3)
+            if self._extrinsics_camera_basis:
+                camera_to_world = -camera_to_world
+                position = -position
             poses.append(CameraPose(
                 source,
                 tuple(float(value) for value in position),
@@ -479,6 +609,11 @@ class MultiCameraPoseFusion:
             camera_positions[source] = np.asarray(position, dtype=np.float64)
 
         primary = observations[0].pose
+        camera_basis_output = (
+            not self.manual_camera_setup
+            and any(item.pose.camera_world_landmarks is not None for item in observations)
+        )
+        output_basis = -np.eye(3) if camera_basis_output else np.eye(3)
         raw_candidates: list[tuple[object, float] | None] = []
         for index in range(31):
             rows, views = [], []
@@ -539,9 +674,10 @@ class MultiCameraPoseFusion:
             if alignment is None:
                 continue
             alignment_rotation, alignment_scale, alignment_translation = alignment
+            geometry_landmarks = self._geometry_landmarks(observation, np)
             aligned_world[observation.source_id] = np.asarray([
                 alignment_scale * (alignment_rotation @ np.asarray(landmark[:3], dtype=np.float64)) + alignment_translation
-                for landmark in observation.pose.world_landmarks
+                for landmark in geometry_landmarks
             ])
 
         limb_groups = (
@@ -592,7 +728,8 @@ class MultiCameraPoseFusion:
         if transform is not None:
             rotation, scale, translation = transform
             expected = np.asarray([scale * (rotation @ point) + translation for point in local_points])
-            center = np.median(expected[[11, 12, 23, 24]], axis=0)
+            room_expected = (output_basis @ expected.T).T
+            center = np.median(room_expected[[11, 12, 23, 24]], axis=0)
             plausible_center = abs(center[0]) <= room_width / 2 + 0.75 and abs(center[2]) <= room_depth / 2 + 0.75
             if not plausible_center or not np.isfinite(expected).all():
                 transform = None
@@ -605,17 +742,21 @@ class MultiCameraPoseFusion:
         self._last_body_transform = transform
         rotation, scale, translation = transform
         expected_points = np.asarray([scale * (rotation @ point) + translation for point in local_points])
+        room_expected_points = (output_basis @ expected_points.T).T
         if self._room_floor is None:
-            self._room_floor = float(expected_points[:, 1].min())
+            self._room_floor = float(room_expected_points[:, 1].min())
 
         fused_world, fused_visibilities = [], []
+        now = self._clock()
         torso = {11, 12, 23, 24}
-        for index, expected in enumerate(expected_points):
+        for index, expected_geometry in enumerate(expected_points):
+            expected = output_basis @ expected_geometry
             candidate = raw_candidates[index]
             tolerance = 0.24 if index in torso else (0.34 if index in CORE_LANDMARKS else 0.46)
             accepted = False
             if candidate is not None:
                 point, confidence = candidate
+                point = output_basis @ point
                 inside_room = (
                     abs(point[0]) <= room_width / 2 + 0.5
                     and self._room_floor - 0.35 <= point[1] <= self._room_floor + room_height + 0.5
@@ -626,15 +767,29 @@ class MultiCameraPoseFusion:
                 output = np.asarray(point, dtype=np.float64)
                 output_confidence = confidence
             else:
-                output = expected
                 visibility = local_visibilities[index]
-                # This is an anatomically constrained model fallback, not an
-                # arbitrary held ray. Preserve enough of a clearly visible
-                # primary landmark's confidence for VRChat calibration to
-                # complete even when one secondary ray is rejected.
-                output_confidence = min(0.74, max(0.36, visibility * 0.78))
+                expected_inside_room = (
+                    np.isfinite(expected).all()
+                    and abs(expected[0]) <= room_width / 2 + 0.5
+                    and self._room_floor - 0.35 <= expected[1] <= self._room_floor + room_height + 0.5
+                    and abs(expected[2]) <= room_depth / 2 + 0.5
+                )
+                if expected_inside_room:
+                    output = expected
+                    output_confidence = min(0.74, max(0.0, visibility * 0.78))
+                else:
+                    previous = self._last_points.get(index)
+                    age = now - self._last_point_times.get(index, float("-inf"))
+                    if previous is not None and age <= 0.35:
+                        output = np.asarray(previous, dtype=np.float64)
+                        output_confidence = min(0.29, max(0.0, visibility))
+                    else:
+                        output = np.zeros(3, dtype=np.float64)
+                        output_confidence = 0.0
             output_tuple = tuple(float(value) for value in output)
-            self._last_points[index] = output_tuple
+            if output_confidence >= 0.35:
+                self._last_points[index] = output_tuple
+                self._last_point_times[index] = now
             fused_world.append([*output_tuple, output_confidence])
             fused_visibilities.append(output_confidence)
 
@@ -665,7 +820,7 @@ def convert_mediapipe_landmarks(
     # +Y up, +Z user-forward, with one unit per meter.
     world = [[-x, -y, -z, visibility] for x, y, z, visibility in world_raw]
     confidence = sum(image[index][3] for index in CORE_LANDMARKS) / len(CORE_LANDMARKS)
-    return PoseResult(True, min(max(confidence, 0.0), 1.0), image, world)
+    return PoseResult(True, min(max(confidence, 0.0), 1.0), image, world, world_raw)
 
 
 class Pose:

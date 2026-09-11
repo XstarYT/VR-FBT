@@ -4,7 +4,7 @@ import unittest
 import cv2
 import numpy as np
 
-from Lib.DebugView import DebugScene3D, project_landmarks, render_camera_mosaic, render_tracking_debug
+from Lib.DebugView import DebugScene3D, fit_image_to_viewport, project_landmarks, render_camera_mosaic, render_tracking_debug, rotate_camera_frame
 from Lib.Tracking import CameraPose, PoseResult
 
 
@@ -62,13 +62,44 @@ class TrackingDebugViewTests(unittest.TestCase):
         scene.reset_world()
         self.assertIsNone(scene._world_center)
 
+    def test_empty_start_does_not_lock_floor_and_manual_floor_is_explicit(self):
+        scene = DebugScene3D(cv2, 640, 480)
+        scene.render([], [], 0.0, 30.0, "NO POSE", 0)
+        self.assertIsNone(scene._floor_y)
+        body = [[0.0, 0.1, 0.0, 0.95] for _ in range(31)]
+        scene.render(body, [], 0.95, 30.0, "TRACKING", 1, floor_y=0.0)
+        self.assertEqual(scene._floor_y, 0.0)
+        self.assertEqual(scene._world_center[1], 0.9)
+
     def test_camera_mosaic_restores_all_annotated_views(self):
         frame = np.zeros((240, 320, 3), dtype=np.uint8)
         landmarks = [[0.5, 0.5, 0.0, 0.9] for _ in range(31)]
         pose = PoseResult(True, 0.9, landmarks, landmarks)
-        mosaic = render_camera_mosaic([(frame, pose, "front"), (frame, pose, "side")], cv2, (320, 240))
+        mosaic = render_camera_mosaic([(frame, pose, "front"), (frame, pose, "side")], cv2)
         self.assertEqual(mosaic.shape, (240, 640, 3))
         self.assertGreater(np.count_nonzero(mosaic), 1000)
+
+    def test_camera_mosaic_preserves_a_full_resolution_portrait_feed(self):
+        frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+        landmarks = [[0.5, 0.5, 0.0, 0.9] for _ in range(31)]
+        pose = PoseResult(True, 0.9, landmarks, landmarks)
+        mosaic = render_camera_mosaic([(frame, pose, "phone")], cv2)
+        self.assertEqual(mosaic.shape, frame.shape)
+
+    def test_viewport_fit_letterboxes_without_changing_aspect_ratio(self):
+        source = np.full((100, 200, 3), 255, dtype=np.uint8)
+        fitted = fit_image_to_viewport(source, (400, 400), cv2)
+        self.assertEqual(fitted.shape, (400, 400, 3))
+        active_rows = np.flatnonzero(np.any(fitted != (18, 13, 8), axis=(1, 2)))
+        self.assertEqual((active_rows[0], active_rows[-1]), (100, 299))
+
+    def test_camera_rotation_supports_phone_landscape_orientations(self):
+        frame = np.zeros((2, 3, 3), dtype=np.uint8)
+        frame[0, 0] = (10, 20, 30)
+        clockwise = rotate_camera_frame(frame, 90, cv2)
+        self.assertEqual(clockwise.shape, (3, 2, 3))
+        self.assertTrue(np.array_equal(clockwise[0, 1], (10, 20, 30)))
+        self.assertTrue(np.array_equal(rotate_camera_frame(clockwise, 270, cv2), frame))
 
 
 if __name__ == "__main__":

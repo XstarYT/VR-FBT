@@ -138,6 +138,55 @@ class RemoteCameraServerTests(unittest.IsolatedAsyncioTestCase):
                 for websocket in sockets:
                     await websocket.close()
 
+    @unittest.skipUnless(importlib.util.find_spec("aiortc"), "WebRTC dependencies are not installed")
+    async def test_pending_webrtc_offer_reserves_identity_before_body_arrives(self):
+        import json
+        from aiohttp import ClientSession, WSServerHandshakeError
+        from aiortc import RTCConfiguration, RTCPeerConnection, VideoStreamTrack
+
+        client = RTCPeerConnection(RTCConfiguration(iceServers=[]))
+        client.addTrack(VideoStreamTrack())
+        await client.setLocalDescription(await client.createOffer())
+        payload = json.dumps({
+            "sdp": client.localDescription.sdp, "type": "offer",
+        }).encode()
+        release_body = asyncio.Event()
+        entered = asyncio.Event()
+        caller_loop = asyncio.get_running_loop()
+        original_authorized = self.hub._authorized
+
+        def authorized(value):
+            caller_loop.call_soon_threadsafe(entered.set)
+            return original_authorized(value)
+
+        self.hub._authorized = authorized
+
+        async def slow_body():
+            yield payload[:1]
+            await release_body.wait()
+            yield payload[1:]
+
+        query = f"token={self.hub.token}&device_id=same-phone"
+        try:
+            async with ClientSession() as session:
+                pending = asyncio.create_task(session.post(
+                    f"http://127.0.0.1:{self.hub.port}/api/webrtc/offer?{query}",
+                    data=slow_body(), headers={"Content-Type": "application/json"},
+                ))
+                await asyncio.wait_for(entered.wait(), 3)
+                with self.assertRaises(WSServerHandshakeError) as error:
+                    await session.ws_connect(f"http://127.0.0.1:{self.hub.port}/ws?{query}")
+                self.assertEqual(error.exception.status, 409)
+                release_body.set()
+                response = await asyncio.wait_for(pending, 10)
+                self.assertEqual(response.status, 200)
+                await response.read()
+                self.assertIn("same-phone", self.hub._peers)
+                self.assertNotIn("same-phone", self.hub._sockets)
+        finally:
+            release_body.set()
+            await client.close()
+
     @unittest.skipUnless(importlib.util.find_spec("cv2"), "OpenCV is not installed")
     async def test_real_jpeg_websocket_to_capture_decode(self):
         from aiohttp import ClientSession

@@ -8,7 +8,7 @@ import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from Lib.Config import CameraSetup, ConfigurationError, Profile, Settings, list_profiles, load_profile, load_settings, profile_camera_setups, profile_camera_sources, run_diagnostics, save_profile, save_settings
+from Lib.Config import CAMERA_CORNER_SIGNS, CameraSetup, ConfigurationError, Profile, Settings, camera_corner_for_setup, camera_setup_for_corner, list_profiles, load_profile, load_settings, profile_camera_setups, profile_camera_sources, run_diagnostics, save_profile, save_settings
 from Lib.Engine import EngineCallbacks, TrackingController
 from Lib.RemoteCam import LocalCamera, RemoteCameraHub, discover_local_cameras, ensure_local_certificates, find_openssl
 
@@ -202,7 +202,10 @@ class VRFBTApp(tk.Tk):
             self.room_width.set(f"{p.room_size_m[0]:.2f}"); self.room_height.set(f"{p.room_size_m[1]:.2f}"); self.room_depth.set(f"{p.room_size_m[2]:.2f}")
             self.camera_setup_values = {setup.source_id: setup for setup in profile_camera_setups(p)}
             self._update_camera_setup_summary()
-            self._select_sources(profile_camera_sources(p))
+            desired_sources = profile_camera_sources(p)
+            # Rebuild against the newly loaded profile so offline saved IDs
+            # get placeholders before their exact ordered selection is applied.
+            self._set_camera_options(getattr(self, "local_cameras", []), desired_sources)
         except Exception as exc: self._write_log("ERROR", str(exc))
 
     def _configuration_from_form(self):
@@ -312,27 +315,41 @@ class VRFBTApp(tk.Tk):
         self._write_log("INFO", "Looking for local cameras…")
         threading.Thread(target=lambda: self.events.put(("camera-scan", discover_local_cameras())), name="camera-discovery", daemon=True).start()
 
-    def _set_camera_options(self, local_cameras) -> None:
+    def _set_camera_options(self, local_cameras, desired_sources=None) -> None:
         configured_sources = profile_camera_sources(self.loaded_profile)
-        selected_sources = [self.camera_sources.get(choice.get()) for choice in self.camera_choices]
-        if not any(selected_sources):
-            selected_sources = list(configured_sources)
+        if desired_sources is None:
+            selected_sources = [self.camera_sources.get(choice.get()) for choice in self.camera_choices]
+            if not any(selected_sources):
+                selected_sources = list(configured_sources)
+        else:
+            selected_sources = list(desired_sources)
         cameras = list(local_cameras)
         for configured in configured_sources:
             if not any(camera.source_id == configured for camera in cameras) and configured.startswith("local:"):
                 index = int(configured.split(":", 1)[1])
                 cameras.append(LocalCamera(index, f"Camera {index}"))
         self.local_cameras = cameras
-        sources = {camera.display_name: camera.source_id for camera in cameras}
-        for camera in self.phone_hub.registry.list_cameras():
-            label = camera.display_name
-            if label in sources:
-                label = f'{label} [{camera.device_id[:8]}]'
-            sources[label] = camera.source_id
+        entries = [(camera.display_name, camera.source_id) for camera in cameras]
+        entries.extend((camera.display_name, camera.source_id) for camera in self.phone_hub.registry.list_cameras())
         for configured in configured_sources:
-            if configured not in sources.values():
+            if configured not in {source for _label, source in entries}:
                 kind, identifier = configured.split(":", 1)
-                sources[f"Saved · {kind} {identifier[:24]} (offline)"] = configured
+                entries.append((f"Saved · {kind} {identifier[:24]} (offline)", configured))
+        label_counts = {
+            label: sum(1 for candidate, _source in entries if candidate == label)
+            for label, _source in entries
+        }
+        sources = {}
+        for base_label, source_id in entries:
+            label = base_label
+            if label_counts[base_label] > 1:
+                label = f"{base_label} [{source_id}]"
+            suffix = 2
+            unique_label = label
+            while unique_label in sources and sources[unique_label] != source_id:
+                unique_label = f"{label} #{suffix}"
+                suffix += 1
+            sources[unique_label] = source_id
         self.camera_sources = sources
         values = list(sources)
         self.camera_combos[0].configure(values=values)
@@ -351,10 +368,10 @@ class VRFBTApp(tk.Tk):
         for index, choice in enumerate(self.camera_choices):
             source_id = source_ids[index] if index < len(source_ids) else None
             display = next((name for name, value in self.camera_sources.items() if value == source_id), None)
-            choice.set(display if display else (choice.get() if index == 0 else "Off"))
+            choice.set(display if display else ("" if index == 0 else "Off"))
 
     def _update_camera_setup_summary(self) -> None:
-        mode = "Manual fixed cameras" if self.manual_camera_setup.get() else "Automatic camera calibration"
+        mode = "Fixed virtual-room cameras" if self.manual_camera_setup.get() else "Automatic fixed anchor"
         self.camera_setup_summary.set(
             f"{mode} · room {self.room_width.get()} × {self.room_height.get()} × {self.room_depth.get()} m"
         )
@@ -378,33 +395,37 @@ class VRFBTApp(tk.Tk):
         dialog.transient(self)
         dialog.grab_set()
         box = ttk.Frame(dialog, padding=22); box.pack(fill="both", expand=True)
-        ttk.Label(box, text="Tracking room and fixed camera layout", font=("Segoe UI Semibold", 16)).grid(row=0, column=0, columnspan=9, sticky="w", pady=(0, 10))
+        ttk.Label(box, text="Tracking room and fixed camera layout", font=("Segoe UI Semibold", 16)).grid(row=0, column=0, columnspan=10, sticky="w", pady=(0, 10))
         manual = tk.BooleanVar(value=self.manual_camera_setup.get())
-        ttk.Checkbutton(box, text="Use these manual camera transforms (all selected cameras)", variable=manual).grid(row=1, column=0, columnspan=9, sticky="w", pady=(0, 10))
+        ttk.Checkbutton(box, text="Anchor cameras at fixed positions in the virtual room", variable=manual).grid(row=1, column=0, columnspan=10, sticky="w", pady=(0, 10))
 
         room_values = [tk.StringVar(value=value.get()) for value in (self.room_width, self.room_height, self.room_depth)]
         ttk.Label(box, text="ROOM W / H / D (m)", style="Muted.TLabel").grid(row=2, column=0, sticky="w")
         for column, variable in enumerate(room_values, start=1):
             ttk.Entry(box, textvariable=variable, width=8).grid(row=2, column=column, padx=4, sticky="ew")
 
-        headings = ("CAMERA", "X", "Y", "Z", "YAW", "PITCH", "ROLL", "H-FOV")
+        headings = ("CAMERA", "CORNER / MODE", "X", "HEIGHT", "Z", "YAW", "PITCH", "ROLL", "H-FOV", "IMAGE ROT")
         for column, heading in enumerate(headings):
             ttk.Label(box, text=heading, style="Muted.TLabel", font=("Segoe UI Semibold", 8)).grid(row=3, column=column, padx=4, pady=(16, 5), sticky="w")
         setup_variables = {}
+        room_now = tuple(float(value.get()) for value in (self.room_width, self.room_height, self.room_depth))
         for row, source in enumerate(sources, start=4):
             setup = self.camera_setup_values.get(source, defaults[source])
             values = [tk.StringVar(value=f"{value:.3f}") for value in (*setup.position, *setup.rotation, setup.horizontal_fov)]
-            setup_variables[source] = values
+            values.append(tk.StringVar(value=str(setup.image_rotation)))
+            corner = tk.StringVar(value=camera_corner_for_setup(setup, room_now))
+            setup_variables[source] = (corner, values)
             ttk.Label(box, text=f"CAM {row - 3} · {source.split(':', 1)[-1][:18]}").grid(row=row, column=0, padx=4, pady=5, sticky="w")
-            for column, variable in enumerate(values, start=1):
+            ttk.Combobox(box, textvariable=corner, values=("Custom coordinates", *CAMERA_CORNER_SIGNS), state="readonly", width=21).grid(row=row, column=1, padx=4, pady=5, sticky="ew")
+            for column, variable in enumerate(values, start=2):
                 ttk.Entry(box, textvariable=variable, width=9).grid(row=row, column=column, padx=4, pady=5, sticky="ew")
 
         ttk.Label(
             box,
-            text="Coordinates use the room center as X=0, Z=0 and the floor as Y=0.\nYaw 0° looks toward +Z; yaw -90° looks toward -X. Pitch tilts vertically. FOV is the camera's horizontal field of view.",
+            text="Quick setup: choose a corner and enter the camera height; X, Z, yaw and pitch are calculated when you apply.\nCustom mode keeps every numeric transform editable. The room center is X=0/Z=0 and floor is Y=0. Image rotation is clockwise.",
             style="Muted.TLabel",
             justify="left",
-        ).grid(row=8, column=0, columnspan=9, sticky="w", pady=(14, 10))
+        ).grid(row=8, column=0, columnspan=10, sticky="w", pady=(14, 10))
 
         def apply_layout():
             try:
@@ -412,21 +433,28 @@ class VRFBTApp(tk.Tk):
                 if not (1.0 <= room[0] <= 20.0 and 1.8 <= room[1] <= 6.0 and 1.0 <= room[2] <= 20.0):
                     raise ValueError("Room must be 1–20 m wide/deep and 1.8–6 m high")
                 setups = {}
-                for source, variables in setup_variables.items():
+                used_corner = False
+                for source, (corner, variables) in setup_variables.items():
                     numbers = [float(variable.get()) for variable in variables]
                     if not 25.0 <= numbers[6] <= 120.0:
                         raise ValueError("Horizontal FOV must be between 25° and 120°")
-                    setups[source] = CameraSetup(source, tuple(numbers[:3]), tuple(numbers[3:6]), numbers[6])
+                    if not numbers[7].is_integer() or int(numbers[7]) not in {0, 90, 180, 270}:
+                        raise ValueError("Image rotation must be 0°, 90°, 180°, or 270°")
+                    setup = CameraSetup(source, tuple(numbers[:3]), tuple(numbers[3:6]), numbers[6], int(numbers[7]))
+                    if corner.get() != "Custom coordinates":
+                        setup = camera_setup_for_corner(setup, corner.get(), numbers[1], room)
+                        used_corner = True
+                    setups[source] = setup
             except ValueError as exc:
                 messagebox.showerror("Invalid camera layout", str(exc), parent=dialog)
                 return
-            self.manual_camera_setup.set(manual.get())
+            self.manual_camera_setup.set(manual.get() or used_corner)
             self.room_width.set(f"{room[0]:.2f}"); self.room_height.set(f"{room[1]:.2f}"); self.room_depth.set(f"{room[2]:.2f}")
             self.camera_setup_values.update(setups)
             self._update_camera_setup_summary()
             dialog.destroy()
 
-        actions = ttk.Frame(box); actions.grid(row=9, column=0, columnspan=9, sticky="e", pady=(8, 0))
+        actions = ttk.Frame(box); actions.grid(row=9, column=0, columnspan=10, sticky="e", pady=(8, 0))
         ttk.Button(actions, text="Cancel", command=dialog.destroy).pack(side="left", padx=6)
         ttk.Button(actions, text="Apply layout", style="Accent.TButton", command=apply_layout).pack(side="left")
 

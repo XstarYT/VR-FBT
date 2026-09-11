@@ -3,6 +3,8 @@ import math
 import unittest
 
 from Lib.VRChat import VRChatPoseSolver, rotation_from_up_forward
+from Lib.Engine import TrackingController
+from Lib import OSCKit
 
 
 @dataclass
@@ -76,6 +78,36 @@ class VRChatPoseTests(unittest.TestCase):
         self.assertEqual(frame.trackers["5"].confidence, 0.2)
         self.assertEqual(frame.trackers["7"].confidence, 0.2)
         self.assertGreater(frame.trackers["6"].confidence, 0.5)
+
+    def test_tracker_hold_and_reacquisition_match_actual_osc_output(self):
+        solver = VRChatPoseSolver()
+        pose = neutral_pose()
+        solver.solve(pose, timestamp=0.0, smooth=False)
+
+        class Server:
+            def __init__(self): self.messages = []
+            def Send(self, message): self.messages.append(message)
+
+        pose["L-Foot"].vis = 0.40
+        held = solver.solve(pose, timestamp=0.10, smooth=False)
+        server = Server()
+        TrackingController._send_vrchat_frame(held, server, OSCKit)
+        self.assertTrue(held.trackers["7"].held)
+        self.assertTrue(any("/7/" in path for path, _value in server.messages))
+
+        pose["L-Foot"].vis = 0.20
+        expired = solver.solve(pose, timestamp=0.50, smooth=False)
+        server = Server()
+        TrackingController._send_vrchat_frame(expired, server, OSCKit)
+        self.assertFalse(expired.trackers["7"].output_eligible)
+        self.assertFalse(any("/7/" in path for path, _value in server.messages))
+
+        pose["L-Foot"].vis = 0.50
+        not_reacquired = solver.solve(pose, timestamp=0.55, smooth=False)
+        self.assertFalse(not_reacquired.trackers["7"].output_eligible)
+        pose["L-Foot"].vis = 0.55
+        reacquired = solver.solve(pose, timestamp=0.60, smooth=False)
+        self.assertTrue(reacquired.trackers["7"].output_eligible)
 
     def test_multiframe_calibration_waits_for_stable_full_body(self):
         solver = VRChatPoseSolver(1.70, calibration_frames=5)

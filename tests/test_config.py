@@ -8,6 +8,8 @@ from Lib.Config import (
     ConfigurationError,
     Profile,
     Settings,
+    camera_corner_for_setup,
+    camera_setup_for_corner,
     load_joint_map,
     load_profile,
     load_settings,
@@ -35,6 +37,16 @@ class ConfigurationTests(unittest.TestCase):
             save_settings(expected, path)
             self.assertEqual(load_settings(path), expected)
 
+    def test_corner_preset_places_and_aims_a_fixed_camera(self):
+        original = CameraSetup("phone:corner", (0.0, 1.4, -2.5), (0.0, 0.0, 0.0), 67.0, 90)
+        placed = camera_setup_for_corner(original, "Back right (+X, +Z)", 1.8, (6.0, 3.0, 4.0))
+        self.assertEqual(placed.position, (3.0, 1.8, 2.0))
+        self.assertEqual(camera_corner_for_setup(placed, (6.0, 3.0, 4.0)), "Back right (+X, +Z)")
+        self.assertAlmostEqual(placed.rotation[0], -123.6900675, places=5)
+        self.assertLess(placed.rotation[1], 0.0)
+        self.assertEqual(placed.horizontal_fov, 67.0)
+        self.assertEqual(placed.image_rotation, 90)
+
     def test_multi_camera_profile_round_trip(self):
         with tempfile.TemporaryDirectory() as directory, patch("Lib.Config.PROFILES_DIR", Path(directory)):
             expected = Profile(
@@ -44,7 +56,7 @@ class ConfigurationTests(unittest.TestCase):
                 manual_camera_setup=True,
                 camera_setups=(
                     CameraSetup("phone:front", (0.0, 1.4, -2.5), (0.0, -8.0, 0.0), 65.0),
-                    CameraSetup("phone:left", (2.5, 1.4, 0.0), (-90.0, -8.0, 0.0), 70.0),
+                    CameraSetup("phone:left", (2.5, 1.4, 0.0), (-90.0, -8.0, 0.0), 70.0, 90),
                     CameraSetup("local:1", (-2.5, 1.4, 0.0), (90.0, -8.0, 0.0), 55.0),
                 ),
                 room_size_m=(5.0, 3.0, 6.0),
@@ -66,6 +78,8 @@ class ConfigurationTests(unittest.TestCase):
             validate_profile(Profile(server_port=70000))
         with self.assertRaises(ConfigurationError):
             validate_profile(Profile(camera_index=-1))
+        with self.assertRaisesRegex(ConfigurationError, "image rotation"):
+            validate_profile(Profile(camera_setups=(CameraSetup("local:0", (0.0, 1.4, -2.5), (0.0, 0.0, 0.0), 60.0, 45),)))
 
     def test_multi_mode_accepts_two_or_three_unique_sources(self):
         validate_profile(Profile(

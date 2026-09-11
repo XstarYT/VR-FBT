@@ -65,6 +65,8 @@ def render_tracking_debug(
     """Return a copy of frame with a skeleton and readable tracking telemetry."""
     canvas = frame.copy()
     height, width = canvas.shape[:2]
+    ui_scale = max(0.75, min(3.0, width / 640.0, height / 480.0))
+    line_thickness = max(2, round(2 * ui_scale))
     points = project_landmarks(landmarks, width, height)
     confidence = min(max(float(confidence), 0.0), 1.0)
     tracking = detected and confidence >= 0.5
@@ -79,7 +81,7 @@ def render_tracking_debug(
         if left is None or right is None:
             continue
         color = strong if min(left[2], right[2]) >= 0.5 else weak
-        cv2.line(canvas, left[:2], right[:2], color, 2, cv2.LINE_AA)
+        cv2.line(canvas, left[:2], right[:2], color, line_thickness, cv2.LINE_AA)
 
     visible_points = 0
     for index, point in enumerate(points):
@@ -88,37 +90,69 @@ def render_tracking_debug(
         color = strong if point[2] >= 0.5 else weak
         if point[2] >= 0.5:
             visible_points += 1
-        cv2.circle(canvas, point[:2], 4, (12, 18, 30), -1, cv2.LINE_AA)
-        cv2.circle(canvas, point[:2], 3, color, -1, cv2.LINE_AA)
+        cv2.circle(canvas, point[:2], max(3, round(4 * ui_scale)), (12, 18, 30), -1, cv2.LINE_AA)
+        cv2.circle(canvas, point[:2], max(2, round(3 * ui_scale)), color, -1, cv2.LINE_AA)
         if index in MAJOR_JOINTS and point[2] >= 0.5:
-            cv2.putText(canvas, MAJOR_JOINTS[index], (point[0] + 6, point[1] - 5),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.38, color, 1, cv2.LINE_AA)
+            cv2.putText(canvas, MAJOR_JOINTS[index], (point[0] + round(6 * ui_scale), point[1] - round(5 * ui_scale)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.38 * ui_scale, color, max(1, round(ui_scale)), cv2.LINE_AA)
 
-    panel_height = 92
+    panel_height = round(92 * ui_scale)
     overlay = canvas.copy()
     cv2.rectangle(overlay, (0, 0), (width, min(panel_height, height)), (8, 13, 25), -1)
     canvas = cv2.addWeighted(overlay, 0.80, canvas, 0.20, 0)
     status = tracking_status or ("TRACKING" if tracking else ("LOW CONFIDENCE" if detected else "NO POSE"))
     status_color = weak if status.startswith(("CALIBRATING", "HOLDING")) else (strong if tracking else lost)
-    cv2.putText(canvas, status, (16, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.78, status_color, 2, cv2.LINE_AA)
+    cv2.putText(canvas, status, (round(16 * ui_scale), round(30 * ui_scale)), cv2.FONT_HERSHEY_SIMPLEX, 0.78 * ui_scale, status_color, line_thickness, cv2.LINE_AA)
     cv2.putText(canvas, f"Pose {confidence * 100:5.1f}%   FPS {fps:5.1f}   Visible {visible_points:02d}/{len(points):02d}",
-                (16, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (235, 240, 250), 1, cv2.LINE_AA)
+                (round(16 * ui_scale), round(55 * ui_scale)), cv2.FONT_HERSHEY_SIMPLEX, 0.50 * ui_scale, (235, 240, 250), max(1, round(ui_scale)), cv2.LINE_AA)
     cv2.putText(canvas, f"{source_label}   Frame {frame_count:,}",
-                (16, 77), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (170, 185, 210), 1, cv2.LINE_AA)
-    if height >= 130:
-        cv2.putText(canvas, "Green = visible   Amber = uncertain   Q = stop", (12, height - 12),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.43, (230, 235, 245), 1, cv2.LINE_AA)
+                (round(16 * ui_scale), round(77 * ui_scale)), cv2.FONT_HERSHEY_SIMPLEX, 0.45 * ui_scale, (170, 185, 210), max(1, round(ui_scale)), cv2.LINE_AA)
+    if height >= round(130 * ui_scale):
+        cv2.putText(canvas, "Green = visible   Amber = uncertain   Q = stop", (round(12 * ui_scale), height - round(12 * ui_scale)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.43 * ui_scale, (230, 235, 245), max(1, round(ui_scale)), cv2.LINE_AA)
     return canvas
 
 
-def render_camera_mosaic(camera_views, cv2, tile_size: tuple[int, int] = (420, 300)):
-    """Render the original annotated camera view for every active source."""
+def rotate_camera_frame(frame, clockwise_degrees: int, cv2):
+    """Rotate a camera frame before both inference and display."""
+    rotation = int(clockwise_degrees) % 360
+    if rotation == 0:
+        return frame
+    codes = {
+        90: cv2.ROTATE_90_CLOCKWISE,
+        180: cv2.ROTATE_180,
+        270: cv2.ROTATE_90_COUNTERCLOCKWISE,
+    }
+    if rotation not in codes:
+        raise ValueError("Camera image rotation must be 0, 90, 180, or 270 degrees")
+    return cv2.rotate(frame, codes[rotation])
+
+
+def fit_image_to_viewport(image, viewport_size: tuple[int, int], cv2):
+    """Aspect-fit an image into an exact viewport without stretching or cropping."""
     import numpy as np
 
-    tile_width, tile_height = tile_size
-    tiles = []
+    viewport_width, viewport_height = (max(1, int(value)) for value in viewport_size)
+    source_height, source_width = image.shape[:2]
+    scale = min(viewport_width / source_width, viewport_height / source_height)
+    fitted_width = max(1, round(source_width * scale))
+    fitted_height = max(1, round(source_height * scale))
+    interpolation = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+    fitted = cv2.resize(image, (fitted_width, fitted_height), interpolation=interpolation)
+    canvas = np.full((viewport_height, viewport_width, 3), (18, 13, 8), dtype=np.uint8)
+    x = (viewport_width - fitted_width) // 2
+    y = (viewport_height - fitted_height) // 2
+    canvas[y:y + fitted_height, x:x + fitted_width] = fitted
+    return canvas
+
+
+def render_camera_mosaic(camera_views, cv2, viewport_size: tuple[int, int] | None = None):
+    """Render annotated sources at native resolution, optionally fitted to a window."""
+    import numpy as np
+
+    views = []
     for frame, pose, label in camera_views:
-        overlay = render_tracking_debug(
+        views.append(render_tracking_debug(
             frame,
             pose.image_landmarks,
             pose.confidence,
@@ -127,15 +161,22 @@ def render_camera_mosaic(camera_views, cv2, tile_size: tuple[int, int] = (420, 3
             label,
             cv2,
             detected=pose.detected,
-        )
-        scale = min(tile_width / overlay.shape[1], tile_height / overlay.shape[0])
-        resized = cv2.resize(overlay, (max(1, round(overlay.shape[1] * scale)), max(1, round(overlay.shape[0] * scale))))
-        tile = np.full((tile_height, tile_width, 3), (18, 13, 8), dtype=np.uint8)
-        x = (tile_width - resized.shape[1]) // 2
-        y = (tile_height - resized.shape[0]) // 2
-        tile[y:y + resized.shape[0], x:x + resized.shape[1]] = resized
-        tiles.append(tile)
-    return np.hstack(tiles) if tiles else np.zeros((tile_height, tile_width, 3), dtype=np.uint8)
+        ))
+    if not views:
+        width, height = viewport_size or (640, 360)
+        return np.zeros((max(1, height), max(1, width), 3), dtype=np.uint8)
+
+    # Preserve every source pixel in the composed image. Shorter feeds are
+    # centered vertically instead of being resampled to another camera's shape.
+    mosaic_height = max(view.shape[0] for view in views)
+    mosaic_width = sum(view.shape[1] for view in views)
+    mosaic = np.full((mosaic_height, mosaic_width, 3), (18, 13, 8), dtype=np.uint8)
+    x = 0
+    for view in views:
+        y = (mosaic_height - view.shape[0]) // 2
+        mosaic[y:y + view.shape[0], x:x + view.shape[1]] = view
+        x += view.shape[1]
+    return fit_image_to_viewport(mosaic, viewport_size, cv2) if viewport_size else mosaic
 
 
 class DebugScene3D:
@@ -192,6 +233,7 @@ class DebugScene3D:
         fps: float,
         status: str,
         active_cameras: int,
+        floor_y: float | None = None,
     ):
         import numpy as np
 
@@ -207,17 +249,32 @@ class DebugScene3D:
                 continue
             valid_points.append((point, visibility) if np.isfinite(point).all() and math.isfinite(visibility) else None)
 
-        body_points = [item[0] for item in valid_points if item is not None]
-        if self._world_center is None:
+        body_points = [item[0] for item in valid_points if item is not None and item[1] >= 0.5]
+        explicit_floor = None
+        try:
+            if floor_y is not None and math.isfinite(float(floor_y)):
+                explicit_floor = float(floor_y)
+        except (TypeError, ValueError):
+            pass
+        if explicit_floor is not None and (
+            self._world_center is None or self._floor_y is None
+            or abs(self._floor_y - explicit_floor) > 1e-6
+        ):
+            self._floor_y = explicit_floor
+            self._world_center = np.array((0.0, explicit_floor + 0.9, 0.0), dtype=float)
+        elif self._world_center is None and body_points and confidence >= 0.5 and "CALIBRAT" not in status.upper():
             # Lock the viewport to the calibration coordinate system. Re-centering
             # on every live pose makes stationary cameras appear to move whenever
             # the person walks, which is exactly the opposite of a useful world view.
-            self._floor_y = min((point[1] for point in body_points), default=-0.9)
+            self._floor_y = min(point[1] for point in body_points)
             self._world_center = np.array((0.0, self._floor_y + 0.9, 0.0), dtype=float)
+        render_floor = self._floor_y if self._floor_y is not None else (explicit_floor or 0.0)
         center = self._world_center
+        if center is None:
+            center = np.array((0.0, render_floor + 0.9, 0.0), dtype=float)
         rotation = self._rotation()
 
-        floor_y = self._floor_y
+        floor_y = render_floor
         room_width, room_height, room_depth = self.room_size_m
         grid_color = (48, 43, 37)
         for fraction in np.linspace(-0.5, 0.5, 11):

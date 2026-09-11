@@ -17,7 +17,7 @@
     .pill.live { color: #38d39f; }
     .card { background: rgba(18,26,44,.96); border: 1px solid #273452; border-radius: 20px; overflow: hidden; box-shadow: 0 22px 70px #0007; }
     .preview { position: relative; aspect-ratio: 4/3; background: #050810; }
-    video { width: 100%; height: 100%; display: block; object-fit: cover; }
+    video { width: 100%; height: 100%; display: block; object-fit: contain; }
     .empty { position: absolute; inset: 0; display: grid; place-items: center; color: #8fa1c0; text-align: center; padding: 30px; }
     .controls { padding: 18px; display: grid; gap: 13px; }
     label { display: grid; gap: 6px; color: #aebbd2; font-size: .82rem; font-weight: 650; }
@@ -47,7 +47,7 @@
       <label>Camera<select id="camera"><option value="">Browser default camera</option></select></label>
       <div class="row">
         <label>Frame rate<select id="fps"><option>10</option><option>15</option><option>20</option><option selected>30</option></select></label>
-        <label>Quality<select id="quality"><option value="0.5">Data saver</option><option value="0.7" selected>Balanced</option><option value="0.85">High</option></select></label>
+        <label>JPEG quality (compatibility mode)<select id="quality"><option value="0.65">Data saver</option><option value="0.82">Balanced</option><option value="0.92" selected>High</option></select></label>
       </div>
       <div class="row"><button id="start">Start camera</button><button id="stop" class="secondary" disabled>Stop</button></div>
       <small id="privacy">Keep this page open and the phone awake. Only share your link with your own devices.</small>
@@ -72,7 +72,7 @@
   if (link.get('device')) clientId = link.get('device');
   if (link.get('name')) $('name').value = link.get('name').slice(0, 80);
   let stream = null, socket = null, timer = null, encoding = false, sent = 0;
-  let peer = null, offerController = null, statsTimer = null;
+  let peer = null, offerController = null, statsTimer = null, directDeadline = null;
   let generation = 0, reconnectTimer = null, retries = 0, connectTimer = null;
   $('privacy').textContent = 'Direct mode: encrypted video travels only between this phone and the PC. No cloud relay is used.';
 
@@ -82,6 +82,7 @@
   }
   function state(label, live = false) { $('status').textContent = label; $('status').className = live ? 'pill live' : 'pill'; }
   function setRunning(running) { $('start').disabled = running; $('stop').disabled = !running; $('camera').disabled = running; $('empty').hidden = running; }
+  function clearDirectDeadline() { if (directDeadline) clearTimeout(directDeadline); directDeadline = null; }
 
   async function refreshCameras() {
     if (!navigator.mediaDevices?.enumerateDevices) return;
@@ -106,7 +107,7 @@
     try {
       const deviceId = $('camera').value;
       const videoConstraints = {
-        width: {ideal: 960}, height: {ideal: 720}, frameRate: {ideal: Number($('fps').value), max: Number($('fps').value)},
+        width: {ideal: 3840}, height: {ideal: 2160}, frameRate: {ideal: Number($('fps').value), max: Number($('fps').value)},
         ...(deviceId ? {deviceId: {exact: deviceId}} : {facingMode: {ideal: 'environment'}}),
       };
       const acquired = await navigator.mediaDevices.getUserMedia({audio: false, video: videoConstraints});
@@ -150,10 +151,18 @@
   async function connectWebRTC(attempt) {
     state('CONNECTING DIRECTLY');
     const connection = peer = new RTCPeerConnection({iceServers: []});
+    clearDirectDeadline();
+    directDeadline = setTimeout(() => {
+      if (attempt === generation && peer === connection && connection.connectionState !== 'connected') {
+        useWebSocketFallback(attempt, new Error('Direct WebRTC connection timed out'));
+      }
+    }, 12000);
     stream.getTracks().forEach(track => connection.addTrack(track, stream));
     connection.addEventListener('connectionstatechange', () => {
       if (attempt !== generation || peer !== connection) return;
       if (connection.connectionState === 'connected') {
+        clearDirectDeadline();
+        $('quality').disabled = true;
         notice(''); state('DIRECT · LAN', true);
         clearInterval(statsTimer);
         statsTimer = setInterval(async () => {
@@ -163,13 +172,13 @@
           }
           state(`DIRECT · ${frames}`, true);
         }, 1000);
-      } else if (['failed', 'closed'].includes(connection.connectionState)) {
+      } else if (['failed', 'closed', 'disconnected'].includes(connection.connectionState)) {
         useWebSocketFallback(attempt, new Error('Direct WebRTC connection ended'));
       }
     });
     await connection.setLocalDescription(await connection.createOffer());
     await waitForIce(connection);
-    if (attempt !== generation) return;
+    if (attempt !== generation || peer !== connection || socket) return;
     offerController = new AbortController();
     const query = new URLSearchParams({token, device_id: clientId, name: $('name').value || 'Phone camera'});
     const response = await fetch(`/api/webrtc/offer?${query}`, {
@@ -178,16 +187,18 @@
     });
     if (!response.ok) throw new Error(`PC rejected WebRTC connection (${response.status})`);
     const answer = await response.json();
-    if (attempt !== generation) return;
+    if (attempt !== generation || peer !== connection || socket) return;
     await connection.setRemoteDescription(answer);
   }
 
   function useWebSocketFallback(attempt, reason) {
-    if (attempt !== generation || !stream) return;
+    if (attempt !== generation || !stream || socket) return;
+    clearDirectDeadline();
     if (offerController) { offerController.abort(); offerController = null; }
     const failedPeer = peer; peer = null;
     if (failedPeer) failedPeer.close();
     clearInterval(statsTimer); statsTimer = null;
+    $('quality').disabled = false;
     $('privacy').textContent = 'LAN compatibility mode: encrypted frames still travel only from this phone to the PC.';
     notice(`Direct video was unavailable (${reason.message || reason}). Using local-network compatibility mode.`);
     connect(attempt);
@@ -222,8 +233,7 @@
     stopSending();
     timer = setInterval(() => {
       if (encoding || !socket || socket.readyState !== WebSocket.OPEN || socket.bufferedAmount > 1_000_000 || !video.videoWidth) return;
-      const scale = Math.min(1, 960 / Math.max(video.videoWidth, video.videoHeight));
-      canvas.width = Math.round(video.videoWidth * scale); canvas.height = Math.round(video.videoHeight * scale);
+      canvas.width = video.videoWidth; canvas.height = video.videoHeight;
       context.drawImage(video, 0, 0, canvas.width, canvas.height); encoding = true;
       const destination = socket, attempt = generation;
       canvas.toBlob(blob => {
@@ -240,16 +250,30 @@
     ++generation;
     clearTimeout(reconnectTimer); clearTimeout(connectTimer);
     clearInterval(statsTimer); statsTimer = null;
+    clearDirectDeadline();
     if (offerController) { offerController.abort(); offerController = null; }
     if (peer) { peer.close(); peer = null; }
     stopSending();
     if (socket) { socket.close(1000, 'user stopped'); socket = null; }
     if (stream) { stream.getTracks().forEach(track => track.stop()); stream = null; }
+    $('quality').disabled = false;
     video.srcObject = null; sent = 0; setRunning(false); state('OFFLINE');
   }
 
   $('start').addEventListener('click', start); $('stop').addEventListener('click', stop);
-  $('fps').addEventListener('change', () => { if (socket?.readyState === WebSocket.OPEN) beginSending(); });
+  $('fps').addEventListener('change', async () => {
+    const track = stream?.getVideoTracks?.()[0];
+    if (track?.applyConstraints) {
+      try {
+        const value = Number($('fps').value);
+        await track.applyConstraints({frameRate: {ideal: value, max: value}});
+        notice('');
+      } catch (error) {
+        notice(`Could not change direct-video frame rate (${error.message || error}). Stop and restart the camera to apply it.`, true);
+      }
+    }
+    if (socket?.readyState === WebSocket.OPEN) beginSending();
+  });
   window.addEventListener('pagehide', stop); refreshCameras().catch(() => {});
   if (!window.isSecureContext) notice('Use the HTTPS link or QR code in the desktop app to enable your camera.', false);
 })();

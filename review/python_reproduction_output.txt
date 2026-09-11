@@ -1,0 +1,12 @@
+PASS F01 coordinates: mean error=0.000 m; vertical correlation=1.000
+PASS F02 calibration gap: missing-pose time does not advance the valid T-pose hold
+PASS F14 calibration buffer: failed synchronized calibration keeps alignment history bounded (0 samples)
+PASS F03 confidence hold: 0.95 -> 0.40 emits the bounded held foot pose after 100 ms
+PASS F04 invalid fallback: unseen out-of-room wrist is bounded with visibility 0.05
+PASS F05 duplicate names: two identical webcams remain selectable as ['local:0', 'local:1', 'local:2']
+PASS F06 profile selection: offline saved source IDs are rebuilt and selected exactly
+PASS F07 capture blocking: silent sources remain isolated from the tracking loop
+PASS F13 debug floor: empty startup defers anchoring and manual room floor stays at 0 m
+PASS F09 legacy launcher: nested launcher imports and runs the maintained root application
+PASS F10 missing edge scale: an edge without shoulder scale is rejected as underdetermined
+PASS F08 connection race: pending WebRTC offer exclusively reserves its device ID and capacity

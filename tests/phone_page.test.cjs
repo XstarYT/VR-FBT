@@ -12,8 +12,8 @@ function element(id) {
 }
 for (const id of ['video', 'canvas', 'notice', 'status', 'camera', 'name', 'fps', 'quality', 'start', 'stop', 'empty']) element(id);
 elements.video.play = async () => {};
-elements.video.videoWidth = 640;
-elements.video.videoHeight = 480;
+elements.video.videoWidth = 1920;
+elements.video.videoHeight = 1080;
 elements.canvas.getContext = () => ({drawImage() {}});
 elements.canvas.toBlob = fn => fn({size: 100});
 elements.fps.value = '15'; elements.quality.value = '0.7';
@@ -61,6 +61,8 @@ function camera() {
   assert.equal(elements.empty.hidden, true);
   for (const fn of [...timers.values()]) fn();
   assert.ok(sockets[0].lastSent);
+  assert.equal(elements.canvas.width, 1920);
+  assert.equal(elements.canvas.height, 1080);
   elements.stop.handlers.click();
   assert.equal(second.track.stopped, true);
   assert.equal(elements.status.textContent, 'OFFLINE');

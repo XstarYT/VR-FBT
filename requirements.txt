@@ -1,4 +1,5 @@
 opencv-contrib-python==5.0.0.93
+scipy>=1.14,<2
 mediapipe==1.0.1
 python-osc>=1.9,<2
 aiohttp>=3.10,<4
@@ -10,3 +11,4 @@ Pillow>=10.4,<12
 rich>=13.8,<15
 pywin32>=306
 toml>=0.10,<1
+pytest>=8,<9

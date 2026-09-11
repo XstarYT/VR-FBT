@@ -16,6 +16,7 @@ elements.canvas.getContext = () => ({drawImage() {}});
 elements.fps.value = '30'; elements.quality.value = '0.7';
 
 const peers = [], requests = [], timers = new Map();
+let requestedConstraints;
 let timerId = 0;
 class Peer {
   constructor(configuration) {
@@ -37,7 +38,7 @@ const context = {
   document: {getElementById: element, createElement: () => ({})},
   window: {isSecureContext: true, addEventListener() {}},
   location: {hash: '#token=direct-secret', search: '', protocol: 'https:', host: `192.168.1.25:9443`, hostname: '192.168.1.25'},
-  navigator: {mediaDevices: {enumerateDevices: async () => [], getUserMedia: async () => stream}},
+  navigator: {mediaDevices: {enumerateDevices: async () => [], getUserMedia: async constraints => { requestedConstraints = constraints; return stream; }}},
   localStorage: {getItem: () => null, setItem() {}},
   crypto: {randomUUID: () => 'android-phone'}, URLSearchParams, RTCPeerConnection: Peer,
   AbortController,
@@ -51,6 +52,8 @@ vm.runInNewContext(script, context);
 
 (async () => {
   await elements.start.handlers.click();
+  assert.equal(requestedConstraints.video.width.ideal, 3840);
+  assert.equal(requestedConstraints.video.height.ideal, 2160);
   assert.equal(peers.length, 1);
   assert.equal(peers[0].configuration.iceServers.length, 0);
   assert.equal(requests.length, 1);

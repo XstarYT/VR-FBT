@@ -45,7 +45,7 @@ The recommended **Stable** mode sends only tracker 2 (hip) and trackers 7–8 (f
 
 For each tracker it sends both `/tracking/trackers/{1-8}/position` in meters and `/tracking/trackers/{1-8}/rotation` in Euler degrees. A confident, filtered head position keeps VRChat's tracker space attached to the headset; head rotation is a single calibration pulse. Low-confidence joints are briefly held through short occlusions and then withheld instead of sending unreliable updates. See VRChat's [OSC Trackers contract](https://docs.vrchat.com/docs/osc-trackers) and [OSC overview](https://docs.vrchat.com/docs/osc-overview).
 
-Keep the debug output enabled while positioning cameras. VR-FBT opens two windows: **3D Tracking Debug** shows a fixed room, fixed camera frustums, and the wireframe moving through that room; **Camera Views** restores the annotated live video from every selected camera so framing, confidence, and mismatched joints remain visible. In the room view, drag with the left mouse button to orbit, use the mouse wheel to zoom, press R to reset the view, or Q to stop tracking.
+Keep the debug output enabled while positioning cameras. VR-FBT opens two windows: **3D Tracking Debug** shows a fixed virtual room, anchored camera frustums, and the wireframe moving through room coordinates; **Camera Views** renders every annotated feed from its native received resolution. This room localization also works with one camera: the first automatic pose is locked as its anchor, or a manually selected corner supplies the physical anchor. Resizing the camera window letterboxes the mosaic instead of stretching or cropping it. In the room view, drag with the left mouse button to orbit, use the mouse wheel to zoom, press R to reset the view, or Q to stop tracking.
 
 ### Pose models
 
@@ -73,7 +73,7 @@ Select two or three different cameras in the setup screen, then start tracking a
 
 The calibration assumes a typical 60-degree horizontal phone-camera field of view because browsers do not expose reliable lens calibration. It uses the detected T-pose skeleton as a temporary calibration target, rejects high-reprojection-error solutions, removes statistical outliers, and computes fixed camera transforms from error-weighted rotation/translation averages. A joint is triangulated when at least two views provide it. If a camera loses an entire arm or leg, the highest-confidence remaining camera takes over every joint in that limb using its calibrated wireframe transform. The existing short-occlusion hold is used only when no camera has a trustworthy observation. Camera frustums remain fixed in room coordinates while the localized skeleton moves through the room.
 
-If automatic placement is inaccurate, click **Camera layout…**, enter the room width/height/depth, enable manual camera transforms, and enter each selected camera's position, yaw, pitch, roll, and horizontal FOV. Room coordinates use the center as X=0/Z=0 and the floor as Y=0. Yaw 0° points toward +Z; yaw -90° points toward -X. Measure phone positions from the floor and room center, and use the camera application's stated horizontal FOV when available.
+For the simplest physical setup, click **Camera layout…**, enter the room width/height/depth, choose one of the four corners for each camera, and enter its height in the **Height** field. Applying a corner automatically enables fixed room anchoring, puts the camera on the corresponding room corner, and aims it toward the room center. Choose **Custom coordinates** to edit X/Z/yaw/pitch/roll yourself. The same dialog has an **Image rotation** correction for a sideways or upside-down phone; choose 0°, 90°, 180°, or 270° clockwise. Rotation is applied before pose detection as well as preview rendering. Room coordinates use the center as X=0/Z=0 and the floor as Y=0.
 
 Triangulated points are accepted only when their rays agree, remain inside the configured room, and preserve a plausible relationship to the detected torso and limb geometry. An impossible intersection is replaced with the aligned body-model point, preventing the long exploding limb lines that a low reprojection error alone can otherwise produce.
 
@@ -86,11 +86,14 @@ Browser camera access generally requires a secure context. Some mobile browsers 
 Run all checks from the activated `.venv`:
 
 ```powershell
-python -m compileall -q Main.py Lib tests
+python -m compileall -q Main.py Lib vrfbt_calib tests review
+python -m pytest -q
 python -m unittest discover -s tests -v
 python Main.py --check
 node tests/phone_page.test.cjs
 node tests/phone_webrtc_page.test.cjs
+python review/bug_reproductions.py
+node review/phone_failure_reproductions.cjs
 python -m pip check
 ```
 

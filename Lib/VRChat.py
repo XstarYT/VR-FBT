@@ -17,6 +17,8 @@ class TrackerPose:
     position: Vector
     rotation: Vector
     confidence: float
+    output_eligible: bool | None = None
+    held: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,7 +275,10 @@ class VRChatPoseSolver:
         smooth: bool,
     ) -> TrackerPose:
         active = self._tracker_active.get(tracker_id, False)
-        threshold = 0.30 if active else 0.55
+        # Acquisition is deliberately stricter than continuation. Samples
+        # below the continuation threshold use the bounded last-good hold and
+        # never refresh it.
+        threshold = 0.50 if active else 0.55
         if confidence >= threshold:
             self._tracker_active[tracker_id] = True
             if smooth:
@@ -281,18 +286,18 @@ class VRChatPoseSolver:
                 rotation_filter = self._rotation_filters.setdefault(tracker_id, _OneEuroVector(2.5, 0.02))
                 position = position_filter.update(position, timestamp)
                 rotation = rotation_filter.update(rotation, timestamp, angular=True)
-            tracker = TrackerPose(position, rotation, confidence)
+            tracker = TrackerPose(position, rotation, confidence, True, False)
             self._last_good_trackers[tracker_id] = tracker
             self._last_good_at[tracker_id] = timestamp
             return tracker
         last = self._last_good_trackers.get(tracker_id)
         age = timestamp - self._last_good_at.get(tracker_id, float("-inf"))
         if active and last is not None and age <= 0.35:
-            return TrackerPose(last.position, last.rotation, 0.50)
+            return TrackerPose(last.position, last.rotation, 0.50, True, True)
         self._tracker_active[tracker_id] = False
         self._position_filters.pop(tracker_id, None)
         self._rotation_filters.pop(tracker_id, None)
-        return TrackerPose(position, rotation, confidence)
+        return TrackerPose(position, rotation, confidence, False, False)
 
     def solve(self, points: Mapping[str, object], timestamp: float | None = None, smooth: bool = True) -> VRChatFrame | None:
         timestamp = time.monotonic() if timestamp is None else float(timestamp)

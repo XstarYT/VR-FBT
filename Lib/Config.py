@@ -26,6 +26,13 @@ POSE_MODEL_HASHES = {
     "pose_landmarker_heavy.task": "64437af838a65d18e5ba7a0d39b465540069bc8aae8308de3e318aad31fcbc7b",
 }
 
+CAMERA_CORNER_SIGNS = {
+    "Front left (-X, -Z)": (-1.0, -1.0),
+    "Front right (+X, -Z)": (1.0, -1.0),
+    "Back left (-X, +Z)": (-1.0, 1.0),
+    "Back right (+X, +Z)": (1.0, 1.0),
+}
+
 
 class ConfigurationError(ValueError):
     """Raised when a settings, profile, or joint-map file is invalid."""
@@ -51,6 +58,7 @@ class CameraSetup:
     position: tuple[float, float, float]
     rotation: tuple[float, float, float]  # yaw, pitch, roll in degrees
     horizontal_fov: float = 60.0
+    image_rotation: int = 0  # clockwise correction before tracking/display
 
 
 @dataclass(slots=True)
@@ -72,6 +80,43 @@ class Profile:
     vrchat_tracker_set: str = "stable"
     joint_map: str = "FULLMAP"
     joy_con_remote: bool = False
+
+
+def camera_setup_for_corner(
+    setup: CameraSetup,
+    corner: str,
+    height_m: float,
+    room_size_m: tuple[float, float, float],
+) -> CameraSetup:
+    """Place a fixed camera in a room corner and aim it at body-center height."""
+    if corner not in CAMERA_CORNER_SIGNS:
+        raise ConfigurationError(f"Unknown camera corner: {corner}")
+    width, room_height, depth = (float(value) for value in room_size_m)
+    height = float(height_m)
+    if not 0.2 <= height <= room_height:
+        raise ConfigurationError(f"Camera height must be between 0.2 m and {room_height:.2f} m")
+    x_sign, z_sign = CAMERA_CORNER_SIGNS[corner]
+    x, z = x_sign * width / 2.0, z_sign * depth / 2.0
+    target_height = min(1.0, room_height * 0.45)
+    yaw = math.degrees(math.atan2(-x, -z))
+    pitch = math.degrees(math.atan2(target_height - height, math.hypot(x, z)))
+    return CameraSetup(
+        setup.source_id,
+        (x, height, z),
+        (yaw, pitch, 0.0),
+        setup.horizontal_fov,
+        setup.image_rotation,
+    )
+
+
+def camera_corner_for_setup(setup: CameraSetup, room_size_m: tuple[float, float, float]) -> str:
+    """Recover the quick-placement corner for a saved transform, if it has one."""
+    width, _height, depth = (float(value) for value in room_size_m)
+    for name, (x_sign, z_sign) in CAMERA_CORNER_SIGNS.items():
+        expected_x, expected_z = x_sign * width / 2.0, z_sign * depth / 2.0
+        if abs(setup.position[0] - expected_x) <= 0.01 and abs(setup.position[2] - expected_z) <= 0.01:
+            return name
+    return "Custom coordinates"
 
 
 def _require_mapping(value: object, label: str) -> dict:
@@ -169,6 +214,7 @@ def load_profile(name: str) -> Profile:
                 tuple(float(value) for value in position),
                 tuple(float(value) for value in rotation),
                 float(entry.get("horizontal-fov", 60.0)),
+                int(entry.get("image-rotation", 0)),
             ))
         profile = Profile(
             name=path.stem,
@@ -220,7 +266,8 @@ def save_profile(profile: Profile) -> None:
             f"source = {json.dumps(setup.source_id)}\n"
             f"position = {json.dumps(list(setup.position))}\n"
             f"rotation = {json.dumps(list(setup.rotation))}\n"
-            f"horizontal-fov = {setup.horizontal_fov:.3f}\n\n"
+            f"horizontal-fov = {setup.horizontal_fov:.3f}\n"
+            f"image-rotation = {setup.image_rotation}\n\n"
             for setup in setups
     )
     tracking_text = (
@@ -292,6 +339,8 @@ def validate_profile(profile: Profile) -> None:
             raise ConfigurationError("Camera setup values must be finite")
         if not 25.0 <= setup.horizontal_fov <= 120.0:
             raise ConfigurationError("Camera horizontal FOV must be between 25 and 120 degrees")
+        if setup.image_rotation not in {0, 90, 180, 270}:
+            raise ConfigurationError("Camera image rotation must be 0, 90, 180, or 270 degrees")
     if profile.pose_quality not in {"lite", "full", "heavy"}:
         raise ConfigurationError("Pose quality must be lite, full, or heavy")
     if not 1.0 <= profile.user_height_m <= 2.5:

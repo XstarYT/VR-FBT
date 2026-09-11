@@ -22,7 +22,7 @@ from typing import Callable
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WEB_PAGE = PROJECT_ROOT / "Content" / "Website" / "index.html"
-MAX_FRAME_BYTES = 4 * 1024 * 1024
+MAX_FRAME_BYTES = 16 * 1024 * 1024
 MAX_PHONE_CAMERAS = 3
 CERTIFICATE_DIR = Path(os.environ.get("LOCALAPPDATA", PROJECT_ROOT)) / "VR-FBT" / "certificates"
 OPENSSL_MARKER = ".generated-by-openssl"
@@ -379,6 +379,8 @@ class RemoteCameraHub:
         self._sockets = {}
         self._peers = {}
         self._peer_tasks = {}
+        self._reservations = {}
+        self._connection_owners = {}
 
     @property
     def running(self) -> bool:
@@ -439,45 +441,70 @@ class RemoteCameraHub:
                 raise web.HTTPUnauthorized()
             return web.json_response([{"id": item.device_id, "name": item.name, "connected": item.connected, "sequence": item.sequence} for item in self.registry.list_cameras()])
 
-        def camera_identity(request):
+        def reserve_camera(request):
             device_id = request.query.get("device_id", "")
             name = request.query.get("name", "Phone camera")
             if not device_id or len(device_id) > 80 or any(not c.isalnum() and c not in '-_' for c in device_id):
                 raise web.HTTPBadRequest(text="invalid device_id")
-            if device_id in self._sockets or device_id in self._peers:
+            if device_id in self._sockets or device_id in self._peers or device_id in self._reservations:
                 raise web.HTTPConflict(text="This phone is already connected in another tab")
-            if len(self._sockets) + len(self._peers) >= MAX_PHONE_CAMERAS:
+            if len(self._sockets) + len(self._peers) + len(self._reservations) >= MAX_PHONE_CAMERAS:
                 raise web.HTTPServiceUnavailable(text=f"Maximum of {MAX_PHONE_CAMERAS} cameras reached")
-            return device_id, name
+            owner = object()
+            self._reservations[device_id] = owner
+            return device_id, name, owner
+
+        def release_reservation(device_id, owner):
+            if self._reservations.get(device_id) is owner:
+                self._reservations.pop(device_id, None)
 
         async def webrtc_offer(request):
             if not self._authorized(request.query.get("token", "")):
                 raise web.HTTPUnauthorized()
-            device_id, name = camera_identity(request)
+            device_id, name, owner = reserve_camera(request)
             try:
                 parameters = await request.json()
                 sdp, description_type = parameters["sdp"], parameters["type"]
                 if description_type != "offer" or not isinstance(sdp, str) or len(sdp) > 100_000:
                     raise ValueError
             except (KeyError, TypeError, ValueError):
+                release_reservation(device_id, owner)
                 raise web.HTTPBadRequest(text="invalid WebRTC offer")
+            except BaseException:
+                release_reservation(device_id, owner)
+                raise
 
-            from aiortc import RTCConfiguration, RTCPeerConnection, RTCSessionDescription
-            from aiortc.mediastreams import MediaStreamError
-
-            peer = RTCPeerConnection(RTCConfiguration(iceServers=[]))
+            try:
+                from aiortc import RTCConfiguration, RTCPeerConnection, RTCSessionDescription
+                from aiortc.mediastreams import MediaStreamError
+                peer = RTCPeerConnection(RTCConfiguration(iceServers=[]))
+            except Exception:
+                release_reservation(device_id, owner)
+                raise
+            release_reservation(device_id, owner)
             self._peers[device_id] = peer
+            self._connection_owners[device_id] = owner
 
             async def close_peer():
-                task = self._peer_tasks.pop(device_id, None)
+                task = self._peer_tasks.get(device_id)
                 if task and task is not asyncio.current_task():
                     task.cancel()
-                self._peers.pop(device_id, None)
-                self.registry.disconnect(device_id)
+                if self._peer_tasks.get(device_id) is task:
+                    self._peer_tasks.pop(device_id, None)
+                owns_connection = (
+                    self._connection_owners.get(device_id) is owner
+                    and self._peers.get(device_id) is peer
+                )
+                if owns_connection:
+                    self._peers.pop(device_id, None)
+                    self._connection_owners.pop(device_id, None)
+                    self.registry.disconnect(device_id)
                 if peer.connectionState != "closed":
                     await peer.close()
 
             async def receive_video(track):
+                if self._connection_owners.get(device_id) is not owner:
+                    return
                 self.registry.connect(device_id, name, request.remote or "adb")
                 try:
                     while True:
@@ -486,12 +513,14 @@ class RemoteCameraHub:
                 except (MediaStreamError, asyncio.CancelledError):
                     pass
                 finally:
-                    self.registry.disconnect(device_id)
+                    if self._connection_owners.get(device_id) is owner:
+                        self.registry.disconnect(device_id)
 
             @peer.on("track")
             def on_track(track):
                 if track.kind == "video":
-                    self._peer_tasks[device_id] = asyncio.create_task(receive_video(track))
+                    if self._connection_owners.get(device_id) is owner:
+                        self._peer_tasks[device_id] = asyncio.create_task(receive_video(track))
 
             @peer.on("connectionstatechange")
             async def on_connectionstatechange():
@@ -510,9 +539,15 @@ class RemoteCameraHub:
         async def websocket(request):
             if not self._authorized(request.query.get("token", "")):
                 raise web.HTTPUnauthorized()
-            device_id, name = camera_identity(request)
-            ws = web.WebSocketResponse(heartbeat=20, max_msg_size=MAX_FRAME_BYTES, compress=False)
+            device_id, name, owner = reserve_camera(request)
+            try:
+                ws = web.WebSocketResponse(heartbeat=20, max_msg_size=MAX_FRAME_BYTES, compress=False)
+            except Exception:
+                release_reservation(device_id, owner)
+                raise
+            release_reservation(device_id, owner)
             self._sockets[device_id] = ws
+            self._connection_owners[device_id] = owner
             try:
                 await ws.prepare(request)
                 self.registry.connect(device_id, name, request.remote or "unknown")
@@ -523,8 +558,10 @@ class RemoteCameraHub:
                     elif message.type is WSMsgType.ERROR:
                         break
             finally:
-                self._sockets.pop(device_id, None)
-                self.registry.disconnect(device_id)
+                if self._connection_owners.get(device_id) is owner and self._sockets.get(device_id) is ws:
+                    self._sockets.pop(device_id, None)
+                    self._connection_owners.pop(device_id, None)
+                    self.registry.disconnect(device_id)
             return ws
 
         app = web.Application(client_max_size=MAX_FRAME_BYTES)
@@ -534,7 +571,8 @@ class RemoteCameraHub:
                 task.cancel()
             await asyncio.gather(*list(self._peer_tasks.values()), return_exceptions=True)
             await asyncio.gather(*(peer.close() for peer in list(self._peers.values())), return_exceptions=True)
-            self._peer_tasks.clear(); self._peers.clear()
+            self._peer_tasks.clear(); self._peers.clear(); self._sockets.clear()
+            self._reservations.clear(); self._connection_owners.clear()
         app.on_shutdown.append(shutdown)
         app.add_routes([web.get("/", index), web.get("/health", health), web.get("/api/cameras", cameras), web.post("/api/webrtc/offer", webrtc_offer), web.get("/ws", websocket)])
         runner = web.AppRunner(app, access_log=None)
