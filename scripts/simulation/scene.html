@@ -1,0 +1,46 @@
+<!doctype html><meta charset="utf-8">
+<script type="importmap">{"imports":{"three":"/scripts/simulation/node_modules/three/build/three.module.js"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import {GLTFLoader} from '/scripts/simulation/node_modules/three/examples/jsm/loaders/GLTFLoader.js';
+const renderer = new THREE.WebGLRenderer({antialias:true, preserveDrawingBuffer:true});
+renderer.setSize(960,720); renderer.setPixelRatio(1);
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0xc8cbd0);
+scene.add(new THREE.HemisphereLight(0xffffff,0x666655,2.5));
+const sun=new THREE.DirectionalLight(0xffffff,3); sun.position.set(2,5,4); scene.add(sun);
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(20,20),new THREE.MeshStandardMaterial({color:0x90969b}));
+ground.rotation.x=-Math.PI/2; ground.position.y=-.01; scene.add(ground);
+const asset=await new GLTFLoader().loadAsync('/review/simulation/assets/Soldier.glb');
+const model=asset.scene; scene.add(model);
+const bounds=new THREE.Box3().setFromObject(model);
+const scale=1.75/(bounds.max.y-bounds.min.y); model.scale.multiplyScalar(scale);
+model.position.y=-bounds.min.y*scale;
+const baseY=model.position.y;
+const mixer=new THREE.AnimationMixer(model);
+const actions=Object.fromEntries(asset.animations.map(clip=>[clip.name,mixer.clipAction(clip)]));
+const bones={};model.traverse(o=>{if(o.isBone)bones[o.name]=o;});
+const positions=[[-2.0,1.35,-3],[2.0,1.35,-3],new URLSearchParams(location.search).get('rig')==='front'?[0,1.5,-3.5]:[3.2,1.35,.3]];
+const cameras=positions.map(p=>{
+ const c=new THREE.PerspectiveCamera(THREE.MathUtils.radToDeg(2*Math.atan(Math.tan(Math.PI/6)*720/960)),960/720,.01,50);
+ c.position.set(p[0],p[1],-p[2]); c.lookAt(0,.9,0); c.updateMatrixWorld(); return c;
+});
+const setups=positions.map((p,i)=>({source_id:`virtual:${i}`,position:p,rotation:[THREE.MathUtils.radToDeg(Math.atan2(-p[0],-p[2])),THREE.MathUtils.radToDeg(Math.atan2(.9-p[1],Math.hypot(p[0],p[2]))),0],horizontal_fov:60}));
+window.info={bones:Object.keys(bones),animations:Object.keys(actions),scale,setups};
+window.renderFrame=(time,cameraIndex)=>{
+ const phase=time<24?'TPose':time<26?'Walk':time<28?'Run':'Walk';
+ mixer.stopAllAction(); const action=actions[phase]||actions[Object.keys(actions)[0]];
+ action.reset().play(); mixer.setTime(time<24?0:time-24);
+ model.position.set(time<24?0:.35*Math.sin((time-24)*1.6),baseY,time<24?0:.18*Math.sin((time-24)*1.2));
+ model.rotation.y=Math.PI+(time<28?0:(time-28)*Math.PI/4);
+ model.updateMatrixWorld(true);
+ renderer.render(scene,cameras[cameraIndex]);
+ const joints={},pixels={};
+ for(const [name,bone] of Object.entries(bones)){
+   const p=bone.getWorldPosition(new THREE.Vector3()); joints[name]=[p.x,p.y,-p.z];
+   const q=p.clone().project(cameras[cameraIndex]);pixels[name]=[(q.x+1)*480,(1-q.y)*360];
+ }
+ return {time,cameraIndex,phase,joints,pixels,image:renderer.domElement.toDataURL('image/jpeg',.94)};
+};
+window.ready=true;
+</script>

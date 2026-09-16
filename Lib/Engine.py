@@ -5,11 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
 import threading
+import math
 import time
 import traceback
 from typing import Callable
 
-from Lib.Config import Profile, Settings, load_joint_map
+from Lib.Config import Profile, Settings, load_joint_map, validate_profile, validate_settings
+from Lib.Metrics import SessionMetrics
+from Lib.Synchronization import FrameSynchronizer, MAX_FRAME_AGE
 
 
 LogCallback = Callable[[str, str], None]
@@ -20,14 +23,16 @@ StatsCallback = Callable[[float, float, int], None]
 class _LatestFrameReader:
     """Continuously capture one source without blocking the tracking loop."""
 
-    def __init__(self, capture, label: str):
+    def __init__(self, capture, label: str, on_frame=None):
         self.capture = capture
         self.label = label
+        self.on_frame = on_frame or (lambda _timestamp: None)
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._sequence = 0
         self._frame = None
         self._captured_at = 0.0
+        self.error: Exception | None = None
         self._thread = threading.Thread(
             target=self._run, name=f"vr-fbt-capture-{label}", daemon=True,
         )
@@ -36,19 +41,32 @@ class _LatestFrameReader:
         self._thread.start()
 
     def _run(self) -> None:
-        while not self._stop.is_set():
-            if not self.capture.isOpened():
-                self._stop.wait(0.05)
-                continue
-            ok, frame = self.capture.read()
-            captured_at = time.perf_counter()
-            if not ok or frame is None:
-                self._stop.wait(0.005)
-                continue
-            with self._lock:
-                self._sequence += 1
-                self._frame = frame
-                self._captured_at = captured_at
+        try:
+            while not self._stop.is_set():
+                if not self.capture.isOpened():
+                    self._stop.wait(0.05)
+                    continue
+                ok, frame = self.capture.read()
+                captured_at = getattr(self.capture, "captured_at", None)
+                if captured_at is None:
+                    captured_at = time.monotonic()
+                if not ok or frame is None:
+                    self._stop.wait(0.005)
+                    continue
+                with self._lock:
+                    self._sequence += 1
+                    self._frame = frame
+                    self._captured_at = captured_at
+                self.on_frame(captured_at)
+        except Exception as exc:
+            self.error = exc
+        finally:
+            # The same thread owns read and release; concurrent native calls
+            # can crash OpenCV rather than raise a recoverable Python error.
+            try:
+                self.capture.release()
+            except Exception as exc:
+                self.error = self.error or exc
 
     def latest(self, after_sequence: int):
         with self._lock:
@@ -74,6 +92,51 @@ class EngineCallbacks:
     log: LogCallback = lambda _level, _message: None
     state: StateCallback = lambda _state: None
     stats: StatsCallback = lambda _fps, _visibility, _frames: None
+    health: Callable[[dict], None] = lambda _snapshot: None
+
+
+class _PoseInference:
+    """At most one inference per camera; collect healthy results independently."""
+
+    def __init__(self, poses, metrics=None):
+        self.poses = poses
+        self.metrics = metrics
+        self.pool = ThreadPoolExecutor(max_workers=len(poses), thread_name_prefix="vr-fbt-pose")
+        self.pending = {}
+
+    def busy(self, source_id):
+        return source_id in self.pending
+
+    def submit(self, source_id, label, frame, frame_size, captured_at):
+        if self.busy(source_id):
+            return False
+        future = self.pool.submit(self._process, source_id, frame, captured_at)
+        self.pending[source_id] = (label, frame, frame_size, captured_at, future)
+        return True
+
+    def _process(self, source_id, frame, captured_at):
+        started = time.monotonic()
+        result = self.poses[source_id].process(frame)
+        completed = time.monotonic()
+        if self.metrics is not None:
+            self.metrics.inference(source_id, (completed - started) * 1000, captured_at, completed, getattr(result, "detected", False))
+        return result
+
+    def poll(self):
+        completed = []
+        for source_id, (label, frame, size, captured_at, future) in list(self.pending.items()):
+            if not future.done():
+                continue
+            del self.pending[source_id]
+            try:
+                result, error = future.result(), None
+            except Exception as exc:
+                result, error = None, exc
+            completed.append((source_id, label, frame, size, captured_at, result, error))
+        return completed
+
+    def close(self):
+        self.pool.shutdown(wait=True, cancel_futures=True)
 
 
 class TrackingController:
@@ -85,6 +148,8 @@ class TrackingController:
         self._thread: threading.Thread | None = None
         self._vrchat_align_event = threading.Event()
         self._vrchat_calibrate_event = threading.Event()
+        self.metrics = SessionMetrics()
+        self.metrics.finish()
 
     @property
     def running(self) -> bool:
@@ -93,6 +158,10 @@ class TrackingController:
     def start(self, settings: Settings, profile: Profile, remote_hub=None) -> None:
         if self.running:
             raise RuntimeError("Tracking is already running")
+        validate_settings(settings)
+        validate_profile(profile)
+        from Lib.Config import profile_camera_sources
+        self.metrics = SessionMetrics(profile_camera_sources(profile))
         self._stop_event.clear()
         self._vrchat_align_event.set()
         self._vrchat_calibrate_event.set()
@@ -124,6 +193,7 @@ class TrackingController:
         poses = {}
         inference_pool = None
         final_state = "stopped"
+        opening_source = None
         try:
             self.callbacks.state("starting")
             self.callbacks.log("INFO", "Loading the pose model and compute backend…")
@@ -131,14 +201,19 @@ class TrackingController:
             from Lib import Data, OSCKit
             from Lib.Config import profile_camera_setups, profile_camera_sources
             from Lib.DebugView import DebugScene3D, fit_image_to_viewport, render_camera_mosaic, rotate_camera_frame
-            from Lib.Tracking import CameraObservation, MultiCameraPoseFusion, Pose
+            from Lib.Tracking import CameraObservation, MultiCameraPoseFusion
+            from Lib.Workers import CameraWorker, PoseWorker
             from Lib.VRChat import VRChatPoseSolver
 
             joint_map = load_joint_map(profile.joint_map)
             mapped_pose = Data.Map(joint_map)
             source_ids = profile_camera_sources(profile)
             camera_setups = profile_camera_setups(profile)
+            estimated_lenses = sum(not setup.lens_intrinsics for setup in camera_setups)
+            if len(source_ids) > 1 and estimated_lenses:
+                self.callbacks.log("WARN", f"{estimated_lenses} camera(s) use estimated lenses; import measured lens calibration for more accurate camera rays")
             image_rotations = {setup.source_id: setup.image_rotation for setup in camera_setups}
+            latency_offsets = {setup.source_id: setup.latency_ms / 1000 for setup in camera_setups}
             fusion = MultiCameraPoseFusion(
                 source_ids,
                 calibration_frames=12,
@@ -151,6 +226,7 @@ class TrackingController:
             osc = OSCKit.Server(profile.server_ip, profile.server_port)
             self.callbacks.log("PASS", f"VRChat OSC output resolved to IPv4 {osc.target[0]}:{osc.target[1]}")
             for source_id in source_ids:
+                opening_source = source_id
                 if source_id.startswith("phone:"):
                     if remote_hub is None or not remote_hub.running:
                         raise RuntimeError("Start the phone camera server before using a phone source")
@@ -160,7 +236,7 @@ class TrackingController:
                     source_label = f"phone camera {device_id}"
                 else:
                     local_index = int(source_id.split(":", 1)[1])
-                    capture = cv2.VideoCapture(local_index, getattr(cv2, "CAP_DSHOW", 0))
+                    capture = CameraWorker(local_index, self._stop_event)
                     source_label = f"local camera {local_index}"
                 if not capture.isOpened():
                     capture.release()
@@ -168,15 +244,17 @@ class TrackingController:
                 if hasattr(capture, "set"):
                     capture.set(getattr(cv2, "CAP_PROP_BUFFERSIZE", 38), 1)
                 captures.append((source_id, source_label, capture))
-                poses[source_id] = Pose(profile.pose_quality)
+                poses[source_id] = PoseWorker(profile.pose_quality, self._stop_event)
+            opening_source = None
             for source_id, source_label, capture in captures:
-                reader = _LatestFrameReader(capture, source_id.replace(":", "-"))
+                reader = _LatestFrameReader(capture, source_id.replace(":", "-"),
+                    on_frame=lambda stamp, source=source_id: self.metrics.capture(source, stamp - latency_offsets.get(source, 0.0)))
                 reader.start()
                 capture_readers.append((source_id, source_label, reader))
-            inference_pool = ThreadPoolExecutor(max_workers=len(captures), thread_name_prefix="vr-fbt-pose")
+            inference_pool = _PoseInference(poses, self.metrics)
 
             target_interval = 1.0 / settings.fps
-            next_frame = started = time.perf_counter()
+            next_frame = started = time.monotonic()
             frames = 0
             sent_frames = 0
             had_pose = False
@@ -205,16 +283,49 @@ class TrackingController:
             camera_window_sized = False
             self.callbacks.state("running")
             camera_calibrated_logged = len(captures) == 1
+            last_geometry_warning = ""
             missing_sources: set[str] = set()
-            last_any_frame = time.perf_counter()
+            last_any_frame = time.monotonic()
             capture_sequences = {source_id: 0 for source_id in source_ids}
+            failed_sources: set[str] = set()
+            inferred_views = {}
+            synchronizer = FrameSynchronizer(source_ids)
+            if len(source_ids) > 1:
+                self.callbacks.log("INFO", "Camera synchronization: adaptive 100–200 ms playback horizon, 33 ms maximum view separation; late views are excluded")
+            for source, delay in latency_offsets.items():
+                if delay:
+                    self.callbacks.log("INFO", f"{source}: subtracting {delay * 1000:.1f} ms measured residual camera delay")
+            next_health = 0.0
 
             while not self._stop_event.is_set():
                 observations = []
-                pending_inference = []
                 camera_views = []
-                capture_now = time.perf_counter()
+                capture_now = time.monotonic()
+                if capture_now >= next_health:
+                    self.callbacks.health(self.metrics.snapshot())
+                    next_health = capture_now + 0.5
+                for source_id, label, frame, frame_size, captured_at, camera_result, error in inference_pool.poll():
+                    if error is not None:
+                        failed_sources.add(source_id)
+                        self.metrics.fail(source_id)
+                        inferred_views.pop(source_id, None)
+                        self.callbacks.log("ERROR", f"{label.capitalize()} inference failed: {error}; restart tracking to retry")
+                        continue
+                    inferred_views[source_id] = (
+                        CameraObservation(source_id, camera_result, frame_size, captured_at), frame, label,
+                    )
+                    synchronizer.add(inferred_views[source_id][0], capture_now)
                 for source_id, label, reader in capture_readers:
+                    if source_id in failed_sources:
+                        continue
+                    if reader.error is not None:
+                        if source_id not in failed_sources:
+                            failed_sources.add(source_id)
+                            self.metrics.fail(source_id)
+                            self.callbacks.log("ERROR", f"{label.capitalize()} failed: {reader.error}; restart tracking to reopen it")
+                        continue
+                    if inference_pool.busy(source_id):
+                        continue
                     latest = reader.latest(capture_sequences[source_id])
                     if latest is None:
                         silent_for = capture_now - reader.last_frame_at if reader.last_frame_at else capture_now - started
@@ -223,8 +334,11 @@ class TrackingController:
                             self.callbacks.log("WARN", f"{label.capitalize()} is not returning fresh frames")
                         continue
                     sequence, captured_at, frame = latest
+                    captured_at -= latency_offsets.get(source_id, 0.0)
+                    self.metrics.select(source_id, sequence)
                     capture_sequences[source_id] = sequence
-                    if capture_now - captured_at > max(0.25, target_interval * 4):
+                    if capture_now - captured_at > MAX_FRAME_AGE:
+                        self.metrics.reject_stale(source_id)
                         if source_id not in missing_sources:
                             missing_sources.add(source_id)
                             self.callbacks.log("WARN", f"{label.capitalize()} frame is stale")
@@ -234,30 +348,32 @@ class TrackingController:
                         self.callbacks.log("PASS", f"{label.capitalize()} resumed")
                     frame = rotate_camera_frame(frame, image_rotations.get(source_id, 0), cv2)
                     height, width = frame.shape[:2]
-                    future = inference_pool.submit(poses[source_id].process, frame)
-                    pending_inference.append((source_id, label, frame, (width, height), captured_at, future))
-                for source_id, label, frame, frame_size, captured_at, future in pending_inference:
-                    camera_result = future.result()
-                    observations.append(CameraObservation(source_id, camera_result, frame_size, captured_at))
-                    camera_views.append((frame, camera_result, label))
-                if observations:
-                    freshest = max(item.captured_at or 0.0 for item in observations)
-                    maximum_skew = max(0.12, target_interval * 2)
-                    observations = [
-                        item for item in observations
-                        if freshest - (item.captured_at or freshest) <= maximum_skew
-                    ]
+                    inference_pool.submit(source_id, label, frame, (width, height), captured_at)
+                if self._stop_event.is_set():
+                    break
+                inference_now = time.monotonic()
+                for source_id, (observation, frame, label) in list(inferred_views.items()):
+                    if source_id in failed_sources or inference_now - observation.captured_at > MAX_FRAME_AGE:
+                        self.metrics.reject_stale(source_id)
+                        del inferred_views[source_id]
+                        continue
+                    observations.append(observation)
+                    camera_views.append((frame, observation.pose, label))
+                observations = synchronizer.select(inference_now, failed_sources)
+                self.metrics.synchronization(observations)
                 if not observations:
                     fusion.update([], cv2)
-                    if time.perf_counter() - last_any_frame > 3.0:
+                    if time.monotonic() - last_any_frame > 3.0:
                         raise RuntimeError("No selected camera has returned a frame for three seconds")
                     self._stop_event.wait(min(target_interval, 0.05))
                     continue
-                last_any_frame = time.perf_counter()
+                last_any_frame = time.monotonic()
+                fusion_started = time.monotonic()
                 fusion_result = fusion.update(observations, cv2)
+                self.metrics.stage("fusion", (time.monotonic() - fusion_started) * 1000)
                 result = fusion_result.pose
                 confidence = result.confidence
-                now = time.perf_counter()
+                now = time.monotonic()
                 debug_status = None
                 if self._vrchat_calibrate_event.is_set():
                     fusion.reset_calibration()
@@ -282,6 +398,17 @@ class TrackingController:
                     if not camera_calibrated_logged:
                         camera_calibrated_logged = True
                         self.callbacks.log("PASS", f"Camera geometry calibrated; fusing {fusion_result.contributing_cameras} views")
+                geometry_warning = fusion_result.calibration_hint if fusion_result.calibrated or getattr(fusion_result, 'safety_paused', False) else ""
+                if geometry_warning != last_geometry_warning:
+                    if geometry_warning:
+                        self.callbacks.log("WARN", geometry_warning)
+                    elif last_geometry_warning:
+                        self.callbacks.log("INFO", "Camera geometry checks recovered")
+                    last_geometry_warning = geometry_warning
+                if getattr(fusion_result, 'safety_paused', False):
+                    usable_pose = False
+                    last_vrchat_frame = None  # geometry faults must not resend stale trackers
+                    debug_status = geometry_warning
                 if usable_pose:
                     mapped_pose.Update(result.world_landmarks, smooth=profile.smooth)
                     vrchat_frame = vrchat_solver.solve(mapped_pose.KeyPoints, timestamp=now, smooth=profile.smooth)
@@ -298,8 +425,10 @@ class TrackingController:
                             calibration_active = False
                             self.callbacks.log("PASS", f"Stable calibration complete: body scale {vrchat_frame.scale:.3f}×, forward correction {vrchat_solver.neutral_yaw:+.1f}°")
                         align_head = self._vrchat_align_event.is_set() and vrchat_frame.head_confidence >= 0.5
-                        self._send_vrchat_frame(vrchat_frame, osc, OSCKit, align_head=align_head, tracker_ids=tracker_ids)
-                        sent_frames += 1
+                        send_started = time.monotonic()
+                        packets = self._send_vrchat_frame(vrchat_frame, osc, OSCKit, align_head=align_head, tracker_ids=tracker_ids)
+                        self.metrics.stage("osc_send", (time.monotonic() - send_started) * 1000, packets)
+                        sent_frames += bool(packets)
                         last_vrchat_frame, last_pose_at = vrchat_frame, now
                         debug_status = "TRACKING"
                         if align_head:
@@ -309,16 +438,19 @@ class TrackingController:
                             self.callbacks.log("PASS", "Pose acquired; sending stabilized VRChat trackers")
                         had_pose = True
                 elif last_vrchat_frame is not None and now - last_pose_at <= 0.35 and not vrchat_solver.calibrating:
-                    self._send_vrchat_frame(last_vrchat_frame, osc, OSCKit, align_head=False, tracker_ids=tracker_ids)
-                    sent_frames += 1
+                    send_started = time.monotonic()
+                    packets = self._send_vrchat_frame(last_vrchat_frame, osc, OSCKit, align_head=False, tracker_ids=tracker_ids)
+                    self.metrics.stage("osc_send", (time.monotonic() - send_started) * 1000, packets)
+                    sent_frames += bool(packets)
                     debug_status = "HOLDING BRIEF OCCLUSION"
                 else:
                     if had_pose:
                         self.callbacks.log("WARN", "Pose lost for over 350 ms; OSC output paused until tracking recovers")
                     had_pose = False
+                if geometry_warning:
+                    debug_status = geometry_warning
                 frames += 1
-                elapsed = max(time.perf_counter() - started, 1e-6)
-                actual_fps = frames / elapsed
+                actual_fps = self.metrics.update()
                 if frames == 1 or frames % max(1, settings.fps // 2) == 0:
                     self.callbacks.stats(actual_fps, confidence, sent_frames)
                 if debug_scene is not None:
@@ -355,33 +487,49 @@ class TrackingController:
                     elif key in (ord("r"), ord("R")):
                         debug_scene.reset_view()
                 next_frame += target_interval
-                delay = next_frame - time.perf_counter()
+                delay = next_frame - time.monotonic()
                 if delay > 0:
                     self._stop_event.wait(delay)
                 elif delay < -target_interval * 2:
-                    next_frame = time.perf_counter()
+                    next_frame = time.monotonic()
         except Exception as exc:
-            final_state = "error"
-            self.callbacks.log("ERROR", f"{type(exc).__name__}: {exc}")
-            self.callbacks.log("DEBUG", traceback.format_exc())
+            if not self._stop_event.is_set():
+                final_state = "error"
+                if opening_source is not None:
+                    self.metrics.fail(opening_source)
+                self.callbacks.log("ERROR", f"{type(exc).__name__}: {exc}")
+                self.callbacks.log("DEBUG", traceback.format_exc())
         finally:
+            self._stop_event.set()
+            def cleanup(label, action):
+                nonlocal final_state
+                try:
+                    action()
+                except Exception as exc:
+                    final_state = "error"
+                    self.callbacks.log("ERROR", f"Could not close {label}: {exc}")
+
             for _source_id, _label, reader in capture_readers:
                 reader.stop()
-            for _source_id, _label, capture in captures:
-                capture.release()
+            owned_captures = {id(reader.capture) for _, _, reader in capture_readers}
+            for _source_id, label, capture in captures:
+                if id(capture) not in owned_captures:
+                    cleanup(label, capture.release)
             for _source_id, _label, reader in capture_readers:
-                reader.join()
+                reader.join(2.5)
             if inference_pool is not None:
-                inference_pool.shutdown(wait=True, cancel_futures=True)
+                cleanup("inference workers", inference_pool.close)
             for pose in poses.values():
-                pose.close()
+                cleanup("pose model", pose.close)
             try:
                 import cv2
                 cv2.destroyAllWindows()
             except Exception:
                 pass
             if osc is not None:
-                osc.close()
+                cleanup("OSC socket", osc.close)
+            self.metrics.finish()
+            self.callbacks.health(self.metrics.snapshot())
             self.callbacks.state(final_state)
             if final_state == "stopped":
                 self.callbacks.log("INFO", "Tracking stopped")
@@ -394,18 +542,27 @@ class TrackingController:
         align_head: bool = False,
         follow_head: bool = True,
         tracker_ids: set[str] | None = None,
-    ) -> None:
+    ) -> int:
+        packets = 0
         for tracker_id, tracker in frame.trackers.items():
             explicit_eligibility = getattr(tracker, "output_eligible", None)
             output_eligible = tracker.confidence >= 0.5 if explicit_eligibility is None else explicit_eligibility
-            if not output_eligible or (tracker_ids is not None and tracker_id not in tracker_ids):
+            if (not output_eligible or (tracker_ids is not None and tracker_id not in tracker_ids)
+                    or not all(math.isfinite(value) for value in (*tracker.position, *tracker.rotation, tracker.confidence))):
                 continue
             base = osc_module.Const.BasePath
             server.Send(osc_module.Phrase.direct(base, tracker_id, osc_module.Const.Type.Position, list(tracker.position)))
             server.Send(osc_module.Phrase.direct(base, tracker_id, osc_module.Const.Type.Rotation, list(tracker.rotation)))
-        if follow_head and frame.head_confidence >= 0.5:
+            packets += 2
+        valid_head = frame.head_confidence >= 0.5 and all(
+            math.isfinite(value) for value in (*frame.head_position, *frame.head_rotation, frame.head_confidence)
+        )
+        if follow_head and valid_head:
             base = osc_module.Const.BasePath
             server.Send(osc_module.Phrase.direct(base, "head", osc_module.Const.Type.Position, list(frame.head_position)))
-        if align_head and frame.head_confidence >= 0.5:
+            packets += 1
+        if align_head and valid_head:
             base = osc_module.Const.BasePath
             server.Send(osc_module.Phrase.direct(base, "head", osc_module.Const.Type.Rotation, list(frame.head_rotation)))
+            packets += 1
+        return packets

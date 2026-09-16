@@ -74,6 +74,7 @@
   let stream = null, socket = null, timer = null, encoding = false, sent = 0;
   let peer = null, offerController = null, statsTimer = null, directDeadline = null;
   let generation = 0, reconnectTimer = null, retries = 0, connectTimer = null;
+  let videoCallback = null;
   $('privacy').textContent = 'Direct mode: encrypted video travels only between this phone and the PC. No cloud relay is used.';
 
   function notice(message, error = false) {
@@ -211,10 +212,31 @@
     const query = new URLSearchParams({token, device_id: clientId, name: $('name').value || 'Phone camera'});
     const ws = socket = new WebSocket(`${protocol}//${location.host}/ws?${query}`);
     ws.binaryType = 'arraybuffer';
+    ws.clock = null;
+    ws.clockPending = null;
+    ws.syncClock = () => {
+      const now = performance.now() / 1000;
+      if (ws.readyState !== WebSocket.OPEN || (ws.clockPending !== null && now - ws.clockPending < 1)) return;
+      ws.clockPending = now;
+      ws.send(JSON.stringify({type: 'clock', client: now}));
+    };
+    ws.onmessage = event => {
+      if (socket !== ws || attempt !== generation) return;
+      let reply;
+      try { reply = JSON.parse(event.data); } catch (_) { return; }
+      const now = performance.now() / 1000;
+      if (reply.type !== 'clock' || reply.client !== ws.clockPending || !Number.isFinite(reply.server)) return;
+      ws.clockPending = null;
+      const rtt = now - reply.client;
+      if (rtt < 0 || rtt > 0.050) return;
+      if (!ws.clock || rtt < ws.clock.rtt || now - ws.clock.updated > 10) {
+        ws.clock = {offset: reply.server - (reply.client + now) / 2, rtt, updated: now};
+      }
+    };
     connectTimer = setTimeout(() => { if (ws.readyState === WebSocket.CONNECTING) ws.close(); }, 15000);
     ws.onopen = () => {
       if (attempt !== generation || socket !== ws) { ws.close(); return; }
-      clearTimeout(connectTimer); retries = 0; notice(''); state('CONNECTED', true); beginSending();
+      clearTimeout(connectTimer); retries = 0; notice(''); state('CONNECTED', true); ws.syncClock(); beginSending();
     };
     ws.onclose = () => {
       if (attempt !== generation || socket !== ws) return;
@@ -231,21 +253,51 @@
 
   function beginSending() {
     stopSending();
-    timer = setInterval(() => {
+    const sendFrame = (frameTime = performance.now()) => {
       if (encoding || !socket || socket.readyState !== WebSocket.OPEN || socket.bufferedAmount > 1_000_000 || !video.videoWidth) return;
+      const captureTime = frameTime / 1000;
+      const clockNow = performance.now() / 1000;
+      if (!socket.clock || clockNow - socket.clock.updated > 1) socket.syncClock();
+      if (!socket.clock || clockNow - socket.clock.updated > 15) {
+        state('SYNCHRONIZING'); return;
+      }
       canvas.width = video.videoWidth; canvas.height = video.videoHeight;
       context.drawImage(video, 0, 0, canvas.width, canvas.height); encoding = true;
       const destination = socket, attempt = generation;
+      const header = new ArrayBuffer(20), timing = new DataView(header);
+      timing.setUint32(0, 0x56465431); // VFT1, network byte order
+      timing.setFloat64(4, captureTime + destination.clock.offset);
+      timing.setFloat64(12, destination.clock.rtt / 2);
       canvas.toBlob(blob => {
         if (attempt !== generation) return;
         encoding = false;
         if (blob && socket === destination && destination.readyState === WebSocket.OPEN && destination.bufferedAmount < 1_000_000) {
-          destination.send(blob); sent += 1; state(`LIVE · ${sent}`, true);
+          destination.send(new Blob([header, blob])); sent += 1; state(`LIVE · ${sent}`, true);
         }
       }, 'image/jpeg', Number($('quality').value));
-    }, 1000 / Number($('fps').value));
+    };
+    if (video.requestVideoFrameCallback) {
+      const attempt = generation;
+      let lastSentAt = -Infinity;
+      const onFrame = (now, metadata) => {
+        if (attempt !== generation || !socket) return;
+        videoCallback = video.requestVideoFrameCallback(onFrame);
+        if (now - lastSentAt < 1000 / Number($('fps').value)) return;
+        lastSentAt = now;
+        const timestamp = Number.isFinite(metadata.captureTime) ? metadata.captureTime :
+          (Number.isFinite(metadata.presentationTime) ? metadata.presentationTime : now);
+        sendFrame(timestamp);
+      };
+      videoCallback = video.requestVideoFrameCallback(onFrame);
+    } else {
+      timer = setInterval(() => sendFrame(), 1000 / Number($('fps').value));
+    }
   }
-  function stopSending() { if (timer) clearInterval(timer); timer = null; encoding = false; }
+  function stopSending() {
+    if (timer) clearInterval(timer);
+    if (videoCallback !== null) video.cancelVideoFrameCallback?.(videoCallback);
+    videoCallback = null; timer = null; encoding = false;
+  }
   function stop() {
     ++generation;
     clearTimeout(reconnectTimer); clearTimeout(connectTimer);

@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 from datetime import datetime
+from dataclasses import replace
+import logging
 import queue
 import threading
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from Lib.Config import CAMERA_CORNER_SIGNS, CameraSetup, ConfigurationError, Profile, Settings, camera_corner_for_setup, camera_setup_for_corner, list_profiles, load_profile, load_settings, profile_camera_setups, profile_camera_sources, run_diagnostics, save_profile, save_settings
 from Lib.Engine import EngineCallbacks, TrackingController
 from Lib.RemoteCam import LocalCamera, RemoteCameraHub, discover_local_cameras, ensure_local_certificates, find_openssl
+from Lib.Widgets import ScrollablePanel
+from Lib.Config import save_configuration
 
 
 BG, PANEL, PANEL_ALT, INPUT_BG = "#0b1020", "#121a2c", "#182238", "#263653"
@@ -19,7 +23,8 @@ GOOD, WARN, BAD = "#38d39f", "#f4b740", "#ff607c"
 POSE_QUALITY_LABELS = {
     "Lite — fastest": "lite",
     "Full — balanced (recommended)": "full",
-    "Heavy — highest accuracy": "heavy",
+    "Heavy — larger model (slower)": "heavy",
+    "DWPose + Full — experimental refinement": "dwpose",
 }
 TRACKER_SET_LABELS = {
     "Stable — hip + feet (recommended)": "stable",
@@ -50,6 +55,7 @@ class VRFBTApp(tk.Tk):
             log=lambda level, msg: self.events.put(("log", level, msg)),
             state=lambda state: self.events.put(("state", state)),
             stats=lambda fps, visibility, frames: self.events.put(("stats", fps, visibility, frames)),
+            health=lambda snapshot: self.events.put(("health", snapshot)),
         ))
         self._configure_style()
         self._build_variables()
@@ -116,13 +122,28 @@ class VRFBTApp(tk.Tk):
         ttk.Label(title_group, text="Low-latency VRChat full-body tracking", style="Muted.TLabel").pack(anchor="w")
         self.status_label = tk.Label(header, textvariable=self.state, bg=PANEL_ALT, fg=MUTED, font=("Segoe UI Semibold", 9), padx=14, pady=7); self.status_label.pack(side="right")
         metrics = ttk.Frame(shell); metrics.pack(fill="x", pady=(0, 16))
-        self._metric(metrics, "LIVE FPS", self.metric_fps).pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self._metric(metrics, "UPDATE FPS", self.metric_fps).pack(side="left", fill="x", expand=True, padx=(0, 8))
         self._metric(metrics, "POSE CONFIDENCE", self.metric_visibility).pack(side="left", fill="x", expand=True, padx=8)
         self._metric(metrics, "FRAMES SENT", self.metric_frames).pack(side="left", fill="x", expand=True, padx=(8, 0))
-        notebook = ttk.Notebook(shell); notebook.pack(fill="both", expand=True)
-        setup_tab, log_tab = ttk.Frame(notebook, style="Panel.TFrame", padding=22), ttk.Frame(notebook, style="Panel.TFrame", padding=16)
+        # Reserve primary controls before packing the expandable notebook so
+        # a short viewport cannot hide Start/Stop behind the setup content.
+        actions = ttk.Frame(shell)
+        actions.pack(side="bottom", fill="x", pady=(14, 0))
+        self.start_button = ttk.Button(actions, text="Start tracking", style="Accent.TButton", command=self._start)
+        self.start_button.pack(side="left")
+        self.stop_button = ttk.Button(actions, text="Stop", command=self._stop, state="disabled")
+        self.stop_button.pack(side="left", padx=8)
+        self.align_button = ttk.Button(actions, text="Recalibrate & align", command=self._realign_vrchat, state="disabled")
+        self.align_button.pack(side="left", padx=8)
+        ttk.Button(actions, text="Save", command=self._save).pack(side="right")
+        self.save_as_button = ttk.Button(actions, text="Save as…", command=self._save_as)
+        self.save_as_button.pack(side="right", padx=8)
+        notebook = self.notebook = ttk.Notebook(shell); notebook.pack(fill="both", expand=True)
+        setup_tab = self.setup_scroll = ScrollablePanel(notebook, PANEL, style="Panel.TFrame")
+        log_tab = ttk.Frame(notebook, style="Panel.TFrame", padding=16)
         notebook.add(setup_tab, text="SETUP"); notebook.add(log_tab, text="ACTIVITY & DIAGNOSTICS")
-        self._build_setup(setup_tab); self._build_log(log_tab)
+        self._build_setup(setup_tab.content); self._build_log(log_tab)
+        setup_tab.bind_navigation()
 
     def _metric(self, parent, label, variable):
         frame = ttk.Frame(parent, style="Panel.TFrame", padding=(18, 14))
@@ -132,7 +153,21 @@ class VRFBTApp(tk.Tk):
 
     def _build_setup(self, parent) -> None:
         left, right = ttk.Frame(parent, style="Panel.TFrame"), ttk.Frame(parent, style="Panel.TFrame")
-        left.pack(side="left", fill="both", expand=True, padx=(0, 20)); right.pack(side="left", fill="both", expand=True)
+        layout = [None]
+
+        def reflow(event):
+            wide = event.width >= 950
+            if wide == layout[0]:
+                return
+            layout[0] = wide
+            parent.columnconfigure(0, weight=1, uniform="setup" if wide else "")
+            parent.columnconfigure(1, weight=1 if wide else 0, uniform="setup" if wide else "")
+            left.grid(row=0, column=0, sticky="new", padx=(0, 20 if wide else 0), pady=(0, 0 if wide else 18))
+            right.grid(row=0 if wide else 1, column=1 if wide else 0, sticky="new")
+
+        parent.bind("<Configure>", reflow, add="+")
+        left.grid(row=0, column=0, sticky="new")
+        right.grid(row=1, column=0, sticky="new")
         self.profile_combo = self._field(left, "PROFILE", self.profile_name, "combo", list_profiles())
         self.profile_combo.bind("<<ComboboxSelected>>", lambda _event: self._load_selected_profile())
         self._field(left, "TARGET FPS", self.fps)
@@ -142,11 +177,11 @@ class VRFBTApp(tk.Tk):
             self._field(left, "CAMERA 3 — OPTIONAL", self.camera_choices[2], "combo", ["Off"]),
         ]
         self.camera_combo = self.camera_combos[0]  # compatibility for integrations/tests
-        ttk.Label(left, text="Multi-camera startup: hold a full-body T-pose for 10 seconds.", foreground=GOOD, style="Panel.TLabel").pack(anchor="w", pady=(0, 9))
+        ttk.Label(left, text="Multi-camera startup: hold a full-body T-pose for 10 seconds.", foreground=GOOD, style="Panel.TLabel", wraplength=340).pack(anchor="w", pady=(0, 9))
         camera_actions = ttk.Frame(left, style="Panel.TFrame"); camera_actions.pack(fill="x", pady=(0, 13))
-        ttk.Button(camera_actions, text="Refresh cameras", command=self._refresh_cameras).pack(side="left")
-        self.phone_button = ttk.Button(camera_actions, text="Connect phone on LAN", command=self._start_phone_server); self.phone_button.pack(side="left", padx=8)
-        ttk.Button(camera_actions, text="Camera layout…", command=self._show_camera_setup).pack(side="left")
+        ttk.Button(camera_actions, text="Refresh cameras", command=self._refresh_cameras).grid(row=0, column=0, sticky="w")
+        self.phone_button = ttk.Button(camera_actions, text="Connect phone on LAN", command=self._start_phone_server); self.phone_button.grid(row=0, column=1, padx=8, sticky="w")
+        ttk.Button(camera_actions, text="Camera layout…", command=self._show_camera_setup).grid(row=1, column=0, pady=(8, 0), sticky="w")
         ttk.Label(left, textvariable=self.camera_setup_summary, style="PanelMuted.TLabel", wraplength=430, justify="left").pack(fill="x", pady=(0, 8))
         ttk.Label(left, textvariable=self.phone_url, style="PanelMuted.TLabel", wraplength=430, justify="left").pack(fill="x", pady=(0, 6))
         self.phone_stop_button = ttk.Button(left, text="Stop phone connection", command=self._stop_phone_server, state='disabled')
@@ -159,11 +194,6 @@ class VRFBTApp(tk.Tk):
         checks = ttk.Frame(right, style="Panel.TFrame"); checks.pack(fill="x", pady=(14, 24))
         ttk.Checkbutton(checks, text="Debug windows (3D room + annotated camera views)", variable=self.show_output).pack(anchor="w", pady=5)
         ttk.Checkbutton(checks, text="Smooth landmark motion", variable=self.smooth).pack(anchor="w", pady=5)
-        actions = ttk.Frame(right, style="Panel.TFrame"); actions.pack(fill="x", pady=(10, 0))
-        self.start_button = ttk.Button(actions, text="Start tracking", style="Accent.TButton", command=self._start); self.start_button.pack(side="left")
-        self.stop_button = ttk.Button(actions, text="Stop", command=self._stop, state="disabled"); self.stop_button.pack(side="left", padx=8)
-        self.align_button = ttk.Button(actions, text="Recalibrate & align", command=self._realign_vrchat, state="disabled"); self.align_button.pack(side="left", padx=8)
-        ttk.Button(actions, text="Save", command=self._save).pack(side="left", padx=8)
         tools = ttk.Frame(right, style="Panel.TFrame"); tools.pack(fill="x", pady=(16, 0))
         ttk.Button(tools, text="Send VRChat OSC test", command=self._test_vrchat_osc).pack(side="left")
         ttk.Button(tools, text="Run system diagnostics", command=self._diagnostics).pack(side="left", padx=8)
@@ -178,6 +208,18 @@ class VRFBTApp(tk.Tk):
         toolbar = ttk.Frame(parent, style="Panel.TFrame"); toolbar.pack(fill="x", pady=(0, 10))
         ttk.Label(toolbar, text="Runtime messages and self-check results", style="PanelMuted.TLabel").pack(side="left")
         ttk.Button(toolbar, text="Clear", command=self._clear_log).pack(side="right")
+        self.export_button = ttk.Button(toolbar, text="Export support ZIP…", command=self._export_support)
+        self.export_button.pack(side="right", padx=8)
+        columns = ("camera", "status", "fps", "inference", "age", "skipped")
+        self.health_table = ttk.Treeview(parent, columns=columns, show="headings", height=3, selectmode="none")
+        for column, heading, width in zip(columns,
+                ("Camera", "Status", "Capture FPS", "Inference p95 ms", "Frame age ms", "Skipped captures"),
+                (95, 155, 100, 125, 110, 125)):
+            self.health_table.heading(column, text=heading)
+            self.health_table.column(column, width=width, minwidth=65, stretch=True)
+        self.health_table.pack(fill="x", pady=(0, 8))
+        ttk.Label(parent, text="Latest session measurements are retained after Stop. Rates use a 2-second window; skipped captures are newer-frame replacements, not network-loss counts.",
+            style="PanelMuted.TLabel", wraplength=780).pack(fill="x", pady=(0, 10))
         self.log = tk.Text(parent, bg="#080d19", fg=TEXT, insertbackground=TEXT, relief="flat", padx=14, pady=12, font=("Cascadia Mono", 9), wrap="word", state="disabled"); self.log.pack(fill="both", expand=True)
         for name, color in {"INFO": "#a8b8d4", "PASS": GOOD, "WARN": WARN, "ERROR": BAD, "DEBUG": "#7887a3"}.items(): self.log.tag_configure(name, foreground=color)
 
@@ -226,12 +268,33 @@ class VRFBTApp(tk.Tk):
 
     def _save(self, quiet=False) -> bool:
         try:
-            settings, profile = self._configuration_from_form(); save_profile(profile); save_settings(settings)
+            settings, profile = self._configuration_from_form()
+            save_configuration(settings, profile)
+            self.loaded_settings, self.loaded_profile = settings, profile
             self.profile_combo.configure(values=list_profiles()); self._write_log("PASS", f"Saved profile {profile.name} and application settings")
             if not quiet: messagebox.showinfo("Saved", "Configuration saved successfully.")
             return True
-        except (ConfigurationError, ValueError) as exc:
+        except (OSError, ConfigurationError, ValueError) as exc:
             self._write_log("ERROR", str(exc)); messagebox.showerror("Invalid configuration", str(exc)); return False
+
+    def _save_as(self) -> None:
+        name = simpledialog.askstring("Save camera setup as", "Name for the new profile:", parent=self)
+        if name is None:
+            return
+        name = name.strip()
+        try:
+            settings, profile = self._configuration_from_form()
+            settings = replace(settings, default_profile=name)
+            profile = replace(profile, name=name)
+            save_configuration(settings, profile, create=True)
+        except (OSError, ValueError) as exc:
+            self._write_log("ERROR", str(exc))
+            messagebox.showerror("Could not create profile", str(exc), parent=self)
+            return
+        self.loaded_settings, self.loaded_profile = settings, profile
+        self.profile_name.set(name)
+        self.profile_combo.configure(values=list_profiles())
+        self._write_log("PASS", f"Created profile {name}; it is now the startup profile")
 
     def _start(self) -> None:
         if not self._save(quiet=True): return
@@ -250,9 +313,16 @@ class VRFBTApp(tk.Tk):
             messagebox.showinfo("VRChat alignment", str(exc))
 
     def _diagnostics(self) -> None:
+        if getattr(self, "_diagnostic_thread", None) and self._diagnostic_thread.is_alive():
+            return
         self._write_log("INFO", "Running repository and runtime diagnostics…")
-        ok = run_diagnostics(lambda name, passed, detail: self._write_log("PASS" if passed else "ERROR", f"{name}: {detail}"))
-        self._write_log("PASS" if ok else "WARN", "Diagnostics passed" if ok else "Diagnostics completed with failures")
+
+        def diagnose():
+            ok = run_diagnostics(lambda name, passed, detail: self.events.put(("log", "PASS" if passed else "ERROR", f"{name}: {detail}")))
+            self.events.put(("log", "PASS" if ok else "WARN", "Diagnostics passed" if ok else "Diagnostics completed with failures"))
+
+        self._diagnostic_thread = threading.Thread(target=diagnose, name="system-diagnostics", daemon=True)
+        self._diagnostic_thread.start()
 
     def _test_vrchat_osc(self) -> None:
         server = None
@@ -269,6 +339,40 @@ class VRFBTApp(tk.Tk):
             if server is not None:
                 server.close()
 
+    def _export_support(self) -> None:
+        if getattr(self, "_export_thread", None) and self._export_thread.is_alive():
+            return
+        snapshot_error = None
+        try:
+            from Lib.Config import validate_profile, validate_settings
+            settings, profile = self._configuration_from_form()
+            validate_settings(settings)
+            validate_profile(profile)
+        except (TypeError, ValueError) as exc:
+            settings = profile = None
+            snapshot_error = f"Visible settings could not be exported: {exc}"
+        destination = filedialog.asksaveasfilename(parent=self, title="Save local support bundle",
+            defaultextension=".zip", filetypes=[("ZIP archive", "*.zip")],
+            initialfile=f"VR-FBT-support-{datetime.now():%Y%m%d-%H%M%S}.zip")
+        if not destination:
+            return
+        activity = self.log.get("1.0", "end-1c")
+        secrets = (self.phone_hub.token, self.primary_phone_url)
+        runtime_metrics = self.controller.metrics.snapshot()
+        self.export_button.configure(state="disabled")
+
+        def export():
+            try:
+                from Lib.Support import export_support_bundle
+                export_support_bundle(destination, settings, profile, secrets=secrets, activity_text=activity,
+                    snapshot_error=snapshot_error, runtime_metrics=runtime_metrics)
+                self.events.put(("support-export", destination, None))
+            except Exception as exc:
+                self.events.put(("support-export", destination, str(exc)))
+
+        self._export_thread = threading.Thread(target=export, name="support-export", daemon=True)
+        self._export_thread.start()
+
     def _drain_events(self) -> None:
         try:
             while True:
@@ -276,8 +380,17 @@ class VRFBTApp(tk.Tk):
                 if event[0] == "log": self._write_log(event[1], event[2])
                 elif event[0] == "state": self._set_state(event[1])
                 elif event[0] == "stats": self.metric_fps.set(f"{event[1]:.1f}"); self.metric_visibility.set(f"{event[2] * 100:.0f}%"); self.metric_frames.set(f"{event[3]:,}")
+                elif event[0] == "health": self._show_health(event[1])
                 elif event[0] == "camera-scan": self._set_camera_options(event[1])
                 elif event[0] == "phone-change": self._set_camera_options(self.local_cameras)
+                elif event[0] == "support-export":
+                    self.export_button.configure(state="normal")
+                    if event[2] is None:
+                        self._write_log("PASS", f"Support ZIP saved locally: {event[1]}")
+                        messagebox.showinfo("Support export saved", f"Saved to {event[1]}\nNothing was uploaded. Review the ZIP before sharing.", parent=self)
+                    else:
+                        self._write_log("ERROR", f"Support export failed: {event[2]}")
+                        messagebox.showerror("Support export failed", event[2], parent=self)
                 elif event[0] == 'phone-ready':
                     if not self._phone_cancel.is_set() and not self._closing:
                         self.primary_phone_url = event[1]
@@ -305,8 +418,29 @@ class VRFBTApp(tk.Tk):
         elif state in {"stopped", "error"}:
             self.start_button.configure(state="normal"); self.stop_button.configure(state="disabled"); self.align_button.configure(state="disabled")
 
+    def _show_health(self, snapshot) -> None:
+        self.metric_fps.set(f"{snapshot['update_fps']:.1f}")
+        self.health_table.delete(*self.health_table.get_children())
+        for row in snapshot["sources"]:
+            p95 = row["inference"]["p95_ms"]
+            age = row["frame_age_ms"]
+            self.health_table.insert("", "end", values=(row["alias"], row["status"],
+                f"{row['capture_fps']:.1f}", "—" if p95 is None else f"{p95:.1f}",
+                "—" if age is None else f"{age:.0f}", row["capture_skipped"]))
+
     def _write_log(self, level, message) -> None:
-        self.log.configure(state="normal"); self.log.insert("end", f"{datetime.now():%H:%M:%S}  {level:<5}  {message.rstrip()}\n", level); self.log.see("end"); self.log.configure(state="disabled")
+        logging.getLogger("vrfbt").log({"ERROR": logging.ERROR, "WARN": logging.WARNING, "DEBUG": logging.DEBUG}.get(level, logging.INFO), message)
+        self.log.configure(state="normal")
+        self.log.insert("end", f"{datetime.now():%H:%M:%S}  {level:<5}  {message.rstrip()}\n", level)
+        lines = int(self.log.index("end-1c").split(".")[0])
+        if lines > 2000:
+            self.log.delete("1.0", f"{lines - 2000 + 1}.0")
+        self.log.see("end")
+        self.log.configure(state="disabled")
+
+    def report_callback_exception(self, exc_type, value, traceback) -> None:
+        logging.getLogger("vrfbt").error("Interface action failed", exc_info=(exc_type, value, traceback))
+        messagebox.showerror("VR-FBT action failed", str(value), parent=self)
 
     def _clear_log(self) -> None:
         self.log.configure(state="normal"); self.log.delete("1.0", "end"); self.log.configure(state="disabled")
@@ -408,24 +542,52 @@ class VRFBTApp(tk.Tk):
         for column, heading in enumerate(headings):
             ttk.Label(box, text=heading, style="Muted.TLabel", font=("Segoe UI Semibold", 8)).grid(row=3, column=column, padx=4, pady=(16, 5), sticky="w")
         setup_variables = {}
+        lens_values = {}
         room_now = tuple(float(value.get()) for value in (self.room_width, self.room_height, self.room_depth))
         for row, source in enumerate(sources, start=4):
             setup = self.camera_setup_values.get(source, defaults[source])
+            lens_values[source] = (setup.lens_intrinsics, setup.lens_distortion)
             values = [tk.StringVar(value=f"{value:.3f}") for value in (*setup.position, *setup.rotation, setup.horizontal_fov)]
             values.append(tk.StringVar(value=str(setup.image_rotation)))
+            values.append(tk.StringVar(value=str(setup.latency_ms)))
             corner = tk.StringVar(value=camera_corner_for_setup(setup, room_now))
             setup_variables[source] = (corner, values)
             ttk.Label(box, text=f"CAM {row - 3} · {source.split(':', 1)[-1][:18]}").grid(row=row, column=0, padx=4, pady=5, sticky="w")
             ttk.Combobox(box, textvariable=corner, values=("Custom coordinates", *CAMERA_CORNER_SIGNS), state="readonly", width=21).grid(row=row, column=1, padx=4, pady=5, sticky="ew")
-            for column, variable in enumerate(values, start=2):
+            for column, variable in enumerate(values[:-1], start=2):
                 ttk.Entry(box, textvariable=variable, width=9).grid(row=row, column=column, padx=4, pady=5, sticky="ew")
+            delay_column = (row - 4) * 3
+            ttk.Label(box, text=f"CAM {row - 3} delay (ms)").grid(row=7, column=delay_column, padx=4, pady=5, sticky="w")
+            ttk.Entry(box, textvariable=values[-1], width=9).grid(row=7, column=delay_column + 1, padx=4, pady=5, sticky="w")
 
         ttk.Label(
             box,
-            text="Quick setup: choose a corner and enter the camera height; X, Z, yaw and pitch are calculated when you apply.\nCustom mode keeps every numeric transform editable. The room center is X=0/Z=0 and floor is Y=0. Image rotation is clockwise.",
+            text="Quick setup: choose a corner and enter the camera height; X, Z, yaw and pitch are calculated when you apply.\nCustom mode keeps every numeric transform editable. The room center is X=0/Z=0 and floor is Y=0. Image rotation is clockwise.\nDelay: measured extra camera latency (0–200 ms) missing from its timestamp. Positive values move the capture time earlier. Leave 0 unless measured.",
             style="Muted.TLabel",
             justify="left",
         ).grid(row=8, column=0, columnspan=10, sticky="w", pady=(14, 10))
+
+        lens_actions = ttk.Frame(box)
+        lens_actions.grid(row=9, column=0, columnspan=10, sticky="w")
+        for index, source in enumerate(sources):
+            status = tk.StringVar(value=f"CAM {index+1}: {'measured lens' if lens_values[source][0] else 'estimated lens'}")
+            def import_lens(source=source, status=status, index=index):
+                path = filedialog.askopenfilename(parent=dialog, title="Import measured lens calibration", filetypes=[("Lens calibration", "*.json")])
+                if not path:
+                    return
+                try:
+                    from Lib.Lens import load_lens
+                    lens_values[source] = load_lens(path)
+                except (ValueError, OSError, KeyError, TypeError) as exc:
+                    messagebox.showerror("Invalid lens calibration", str(exc), parent=dialog)
+                    return
+                status.set(f"CAM {index+1}: measured lens")
+            def clear_lens(source=source, status=status, index=index):
+                lens_values[source] = ((), ())
+                status.set(f"CAM {index+1}: estimated lens")
+            ttk.Label(lens_actions, textvariable=status).grid(row=index, column=0, sticky="w", padx=4)
+            ttk.Button(lens_actions, text="Import lens…", command=import_lens).grid(row=index, column=1, padx=4)
+            ttk.Button(lens_actions, text="Clear lens", command=clear_lens).grid(row=index, column=2, padx=4)
 
         def apply_layout():
             try:
@@ -440,7 +602,9 @@ class VRFBTApp(tk.Tk):
                         raise ValueError("Horizontal FOV must be between 25° and 120°")
                     if not numbers[7].is_integer() or int(numbers[7]) not in {0, 90, 180, 270}:
                         raise ValueError("Image rotation must be 0°, 90°, 180°, or 270°")
-                    setup = CameraSetup(source, tuple(numbers[:3]), tuple(numbers[3:6]), numbers[6], int(numbers[7]))
+                    if not 0 <= numbers[8] <= 200:
+                        raise ValueError("Residual camera delay must be between 0 and 200 ms")
+                    setup = CameraSetup(source, tuple(numbers[:3]), tuple(numbers[3:6]), numbers[6], int(numbers[7]), numbers[8], *lens_values[source])
                     if corner.get() != "Custom coordinates":
                         setup = camera_setup_for_corner(setup, corner.get(), numbers[1], room)
                         used_corner = True
@@ -454,7 +618,7 @@ class VRFBTApp(tk.Tk):
             self._update_camera_setup_summary()
             dialog.destroy()
 
-        actions = ttk.Frame(box); actions.grid(row=9, column=0, columnspan=10, sticky="e", pady=(8, 0))
+        actions = ttk.Frame(box); actions.grid(row=10, column=0, columnspan=10, sticky="e", pady=(8, 0))
         ttk.Button(actions, text="Cancel", command=dialog.destroy).pack(side="left", padx=6)
         ttk.Button(actions, text="Apply layout", style="Accent.TButton", command=apply_layout).pack(side="left")
 

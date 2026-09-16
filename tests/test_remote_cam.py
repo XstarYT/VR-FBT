@@ -6,6 +6,7 @@ import tempfile
 import time
 import unittest
 import urllib.request
+from unittest.mock import patch
 from urllib.parse import urlsplit
 
 from pathlib import Path
@@ -14,6 +15,42 @@ from Lib.RemoteCam import OPENSSL_MARKER, LocalCamera, MAX_FRAME_BYTES, RemoteCa
 
 
 class RemoteCameraRegistryTests(unittest.TestCase):
+    def test_offline_history_is_bounded_without_evicting_active_cameras(self):
+        from Lib.RemoteCam import MAX_OFFLINE_PHONE_HISTORY
+        registry = RemoteCameraRegistry()
+        registry.connect("active", "Active", "local")
+        registry.update_frame("active", b"live")
+        for index in range(200):
+            device = f"visitor-{index}"
+            registry.connect(device, device, "local")
+            registry.update_frame(device, b"image")
+            registry.disconnect(device)
+        cameras = registry.list_cameras()
+        self.assertEqual(len(cameras), MAX_OFFLINE_PHONE_HISTORY + 1)
+        self.assertEqual([item.device_id for item in cameras if item.connected], ["active"])
+        self.assertEqual(registry.wait_for_frame("active", timeout=0)[1], b"live")
+        self.assertNotIn("visitor-0", {item.device_id for item in cameras})
+        self.assertIn("visitor-199", {item.device_id for item in cameras})
+
+    def test_evicted_phone_reconnect_advances_existing_capture_cursor(self):
+        from Lib.RemoteCam import MAX_OFFLINE_PHONE_HISTORY
+        registry = RemoteCameraRegistry()
+        registry.connect("returning", "Returning", "local")
+        for _ in range(100):
+            registry.update_frame("returning", b"old")
+        cursor, _ = registry.wait_for_frame("returning", timeout=0)
+        registry.disconnect("returning")
+        for index in range(MAX_OFFLINE_PHONE_HISTORY):
+            device = f"visitor-{index}"
+            registry.connect(device, device, "local")
+            registry.disconnect(device)
+        registry.connect("returning", "Returning", "local")
+        self.assertIsNone(registry.wait_for_frame("returning", cursor, timeout=0))
+        registry.update_frame("returning", b"new")
+        sequence, frame = registry.wait_for_frame("returning", cursor, timeout=0)
+        self.assertGreater(sequence, cursor)
+        self.assertEqual(frame, b"new")
+
     def test_friendly_local_camera_label(self):
         camera = LocalCamera(2, "Logitech BRIO")
         self.assertEqual(camera.source_id, "local:2")
@@ -68,6 +105,84 @@ class RemoteCameraRegistryTests(unittest.TestCase):
 
 @unittest.skipUnless(importlib.util.find_spec("aiohttp"), "aiohttp is not installed")
 class RemoteCameraServerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_phone_clock_and_timestamped_frames_preserve_capture_time(self):
+        import struct
+        from aiohttp import ClientSession
+        base = f"http://127.0.0.1:{self.hub.port}"
+        query = f"token={self.hub.token}&device_id=timed-phone"
+        async with ClientSession() as session:
+            async with session.ws_connect(f"{base}/ws?{query}") as ws:
+                before = time.monotonic()
+                await ws.send_json({'type': 'clock', 'client': 12.5})
+                reply = await ws.receive_json(timeout=2)
+                self.assertEqual(reply['client'], 12.5)
+                self.assertLessEqual(before, reply['server'])
+                self.assertLessEqual(reply['server'], time.monotonic())
+                stamp = time.monotonic() - .080
+                await ws.send_bytes(b'VFT1' + struct.pack('!dd', stamp, .005) + b'jpeg')
+                result = await asyncio.to_thread(self.hub.registry.wait_for_frame, 'timed-phone', 0, 2, include_timestamp=True)
+                self.assertEqual(result[1:], (b'jpeg', stamp))
+                await ws.send_bytes(b'VFT1' + struct.pack('!dd', stamp - 1, .005) + b'stale')
+                await ws.send_bytes(b'VFT1' + struct.pack('!dd', time.monotonic() + 10, .005) + b'future')
+                await ws.send_bytes(b'VFT1' + struct.pack('!dd', time.monotonic(), .005) + b'fresh')
+                result = await asyncio.to_thread(self.hub.registry.wait_for_frame, 'timed-phone', result[0], 2)
+                self.assertEqual(result, (2, b'fresh'))
+
+    async def test_invalid_phone_clock_estimate_closes_connection(self):
+        import struct
+        from aiohttp import ClientSession, WSMsgType
+        base = f"http://127.0.0.1:{self.hub.port}"
+        async with ClientSession() as session:
+            async with session.ws_connect(f"{base}/ws?token={self.hub.token}&device_id=bad-clock") as ws:
+                await ws.send_bytes(b'VFT1' + struct.pack('!dd', float('nan'), .005) + b'jpeg')
+                response = await ws.receive(timeout=2)
+                self.assertEqual(response.type, WSMsgType.CLOSE)
+                self.assertEqual(response.data, 1007)
+
+    async def test_abandoned_offer_body_releases_phone_slot(self):
+        from aiohttp import ClientSession
+
+        async def unfinished_body():
+            yield b'{"sdp":'
+            await asyncio.sleep(5)
+
+        query = f"token={self.hub.token}&device_id=slow-phone"
+        base = f"http://127.0.0.1:{self.hub.port}"
+        with patch("Lib.RemoteCam.WEBRTC_OFFER_TIMEOUT", 0.1):
+            async with ClientSession() as session:
+                async with session.post(f"{base}/api/webrtc/offer?{query}", data=unfinished_body(), headers={"Content-Type": "application/json"}) as response:
+                    self.assertEqual(response.status, 408)
+                    await response.read()
+                async with session.ws_connect(f"{base}/ws?{query}") as ws:
+                    await ws.send_bytes(b"recovered")
+                    frame = await asyncio.to_thread(self.hub.registry.wait_for_frame, "slow-phone", 0, 2)
+                    self.assertEqual(frame[1], b"recovered")
+
+    async def test_unfinished_webrtc_connection_expires_and_allows_fallback(self):
+        from aiohttp import ClientSession
+        from aiortc import RTCConfiguration, RTCPeerConnection
+
+        client = RTCPeerConnection(RTCConfiguration(iceServers=[]))
+        client.addTransceiver("video", direction="sendonly")
+        query = f"token={self.hub.token}&device_id=abandoned-peer"
+        base = f"http://127.0.0.1:{self.hub.port}"
+        try:
+            await client.setLocalDescription(await client.createOffer())
+            with patch("Lib.RemoteCam.WEBRTC_FRAME_TIMEOUT", 0.3):
+                async with ClientSession() as session:
+                    async with session.post(f"{base}/api/webrtc/offer?{query}", json={"sdp": client.localDescription.sdp, "type": "offer"}) as response:
+                        self.assertEqual(response.status, 200)
+                        await response.read()
+                    # Deliberately never accept the answer or send video.
+                    deadline = time.monotonic() + 3
+                    while "abandoned-peer" in self.hub._peers and time.monotonic() < deadline:
+                        await asyncio.sleep(0.02)
+                    self.assertNotIn("abandoned-peer", self.hub._peers)
+                    async with session.ws_connect(f"{base}/ws?{query}") as ws:
+                        self.assertFalse(ws.closed)
+        finally:
+            await client.close()
+
     async def asyncSetUp(self):
         probe = socket.socket()
         probe.bind(("127.0.0.1", 0))

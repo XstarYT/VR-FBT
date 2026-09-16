@@ -41,7 +41,6 @@ class ReviewRegressionTests(unittest.TestCase):
             self.assertGreater(latest[0], 3)
         finally:
             silent.stop(); healthy.stop()
-            silent_capture.release(); healthy_capture.release()
             silent.join(0.5); healthy.join(0.5)
 
     def test_nested_launcher_imports_root_from_unrelated_working_directory(self):

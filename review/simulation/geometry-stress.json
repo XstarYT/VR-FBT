@@ -1,0 +1,336 @@
+{
+  "method": "Perturb cached production detections to isolate lens/layout guard behavior.\n\nThis is a geometry fault injection, not a new inference test on distorted images.\n",
+  "results": [
+    {
+      "camera_count": 3,
+      "scenario": "normal",
+      "input": "rendered_detector",
+      "calibrated_at_s": 10.133333333333333,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.8057909604519774,
+      "within_20cm_fraction": 0.8036723163841808,
+      "all_joint_error_m": {
+        "mean": 0.1103,
+        "p50": 0.0584,
+        "p95": 0.4776,
+        "max": 1.0272
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0544,
+        "p50": 0.0491,
+        "p95": 0.1111,
+        "max": 0.2521
+      },
+      "live_time_error_m": {
+        "mean": 0.2053,
+        "p50": 0.1515,
+        "p95": 0.5253,
+        "max": 0.8253
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0519,
+          "p50": 0.0519,
+          "p95": 0.0866,
+          "max": 0.1267
+        },
+        "run": {
+          "mean": 0.0582,
+          "p50": 0.0537,
+          "p95": 0.1028,
+          "max": 0.2521
+        },
+        "turn": {
+          "mean": 0.0535,
+          "p50": 0.0453,
+          "p95": 0.1236,
+          "max": 0.2521
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false,
+      "safety_paused_fraction": 0.0,
+      "geometry_warnings": [],
+      "quarantined_sources": [],
+      "fault": "unchanged"
+    },
+    {
+      "camera_count": 3,
+      "scenario": "normal",
+      "input": "rendered_detector",
+      "calibrated_at_s": 10.133333333333333,
+      "calibration_hint": "Camera views disagree; output paused. Check camera layout, lens calibration and timestamps",
+      "motion_frames": 236,
+      "detected_fraction": 0.9279661016949152,
+      "eligible_joint_fraction": 0.7298728813559322,
+      "within_20cm_fraction": 0.7291666666666666,
+      "all_joint_error_m": {
+        "mean": 0.117,
+        "p50": 0.0614,
+        "p95": 0.478,
+        "max": 1.0272
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0557,
+        "p50": 0.0517,
+        "p95": 0.1147,
+        "max": 0.2521
+      },
+      "live_time_error_m": {
+        "mean": 0.2077,
+        "p50": 0.1538,
+        "p95": 0.5339,
+        "max": 0.8253
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0519,
+          "p50": 0.0519,
+          "p95": 0.0866,
+          "max": 0.1267
+        },
+        "run": {
+          "mean": 0.0565,
+          "p50": 0.0551,
+          "p95": 0.0993,
+          "max": 0.1914
+        },
+        "turn": {
+          "mean": 0.0576,
+          "p50": 0.0497,
+          "p95": 0.1314,
+          "max": 0.2521
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false,
+      "safety_paused_fraction": 0.07203389830508475,
+      "geometry_warnings": [
+        "Camera views disagree; output paused. Check camera layout, lens calibration and timestamps",
+        "Camera virtual:2 disagrees; excluded while checking calibration"
+      ],
+      "quarantined_sources": [],
+      "fault": "moved_third_camera"
+    },
+    {
+      "camera_count": 2,
+      "scenario": "normal",
+      "input": "rendered_detector",
+      "calibrated_at_s": 10.133333333333333,
+      "calibration_hint": "Camera views disagree; output paused. Check camera layout, lens calibration and timestamps",
+      "motion_frames": 236,
+      "detected_fraction": 0.6228813559322034,
+      "eligible_joint_fraction": 0.2189265536723164,
+      "within_20cm_fraction": 0.2189265536723164,
+      "all_joint_error_m": {
+        "mean": 0.2812,
+        "p50": 0.2608,
+        "p95": 0.6757,
+        "max": 1.0245
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0532,
+        "p50": 0.0531,
+        "p95": 0.0927,
+        "max": 0.1267
+      },
+      "live_time_error_m": {
+        "mean": 0.3039,
+        "p50": 0.2787,
+        "p95": 0.6383,
+        "max": 0.9373
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0532,
+          "p50": 0.0531,
+          "p95": 0.0927,
+          "max": 0.1267
+        },
+        "run": null,
+        "turn": null
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false,
+      "safety_paused_fraction": 0.3771186440677966,
+      "geometry_warnings": [
+        "Camera views disagree; output paused. Check camera layout, lens calibration and timestamps"
+      ],
+      "quarantined_sources": [],
+      "fault": "misaligned_two"
+    },
+    {
+      "camera_count": 3,
+      "scenario": "normal",
+      "input": "rendered_detector",
+      "calibrated_at_s": 14.066666666666666,
+      "calibration_hint": "Excluded camera(s): virtual:2; check layout and Recalibrate",
+      "motion_frames": 236,
+      "detected_fraction": 0.9915254237288136,
+      "eligible_joint_fraction": 0.7800141242937854,
+      "within_20cm_fraction": 0.7771892655367232,
+      "all_joint_error_m": {
+        "mean": 0.117,
+        "p50": 0.0617,
+        "p95": 0.4838,
+        "max": 0.9166
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0567,
+        "p50": 0.0523,
+        "p95": 0.1166,
+        "max": 0.2521
+      },
+      "live_time_error_m": {
+        "mean": 0.206,
+        "p50": 0.1567,
+        "p95": 0.4995,
+        "max": 0.8136
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0534,
+          "p50": 0.0535,
+          "p95": 0.092,
+          "max": 0.1267
+        },
+        "run": {
+          "mean": 0.0581,
+          "p50": 0.0548,
+          "p95": 0.1033,
+          "max": 0.2521
+        },
+        "turn": {
+          "mean": 0.058,
+          "p50": 0.0498,
+          "p95": 0.1312,
+          "max": 0.2521
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false,
+      "safety_paused_fraction": 0.00847457627118644,
+      "geometry_warnings": [
+        "Camera virtual:2 disagrees; excluded while checking calibration",
+        "Excluded camera(s): virtual:2; check layout and Recalibrate",
+        "Not enough trusted cameras; restore camera layout and Recalibrate"
+      ],
+      "quarantined_sources": [
+        "virtual:2"
+      ],
+      "fault": "wrong_fov_third"
+    },
+    {
+      "camera_count": 3,
+      "scenario": "normal",
+      "input": "rendered_detector",
+      "calibrated_at_s": 10.133333333333333,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.8121468926553672,
+      "within_20cm_fraction": 0.8100282485875706,
+      "all_joint_error_m": {
+        "mean": 0.1079,
+        "p50": 0.0561,
+        "p95": 0.4767,
+        "max": 1.0232
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0531,
+        "p50": 0.0484,
+        "p95": 0.1078,
+        "max": 0.2515
+      },
+      "live_time_error_m": {
+        "mean": 0.2044,
+        "p50": 0.151,
+        "p95": 0.5271,
+        "max": 0.8224
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.05,
+          "p50": 0.0508,
+          "p95": 0.0836,
+          "max": 0.1234
+        },
+        "run": {
+          "mean": 0.0575,
+          "p50": 0.0529,
+          "p95": 0.1024,
+          "max": 0.2515
+        },
+        "turn": {
+          "mean": 0.0522,
+          "p50": 0.0438,
+          "p95": 0.1198,
+          "max": 0.2511
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false,
+      "safety_paused_fraction": 0.0,
+      "geometry_warnings": [],
+      "quarantined_sources": [],
+      "fault": "distorted_uncorrected"
+    },
+    {
+      "camera_count": 3,
+      "scenario": "normal",
+      "input": "rendered_detector",
+      "calibrated_at_s": 10.133333333333333,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.8057909604519774,
+      "within_20cm_fraction": 0.8036723163841808,
+      "all_joint_error_m": {
+        "mean": 0.1103,
+        "p50": 0.0584,
+        "p95": 0.4776,
+        "max": 1.0272
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0544,
+        "p50": 0.0491,
+        "p95": 0.1111,
+        "max": 0.2521
+      },
+      "live_time_error_m": {
+        "mean": 0.2053,
+        "p50": 0.1515,
+        "p95": 0.5253,
+        "max": 0.8253
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0519,
+          "p50": 0.0519,
+          "p95": 0.0866,
+          "max": 0.1267
+        },
+        "run": {
+          "mean": 0.0582,
+          "p50": 0.0537,
+          "p95": 0.1028,
+          "max": 0.2521
+        },
+        "turn": {
+          "mean": 0.0535,
+          "p50": 0.0453,
+          "p95": 0.1236,
+          "max": 0.2521
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false,
+      "safety_paused_fraction": 0.0,
+      "geometry_warnings": [],
+      "quarantined_sources": [],
+      "fault": "distorted_corrected"
+    }
+  ]
+}

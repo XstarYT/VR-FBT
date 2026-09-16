@@ -100,7 +100,7 @@ class ConfigurationTests(unittest.TestCase):
             validate_profile(Profile(camera_sources=("local:0", "phone:side"), tracking_mode="SINGLE"))
 
     def test_pose_quality_is_validated(self):
-        for quality in ("lite", "full", "heavy"):
+        for quality in ("lite", "full", "heavy", "dwpose"):
             validate_profile(Profile(pose_quality=quality))
         with self.assertRaisesRegex(ConfigurationError, "Pose quality"):
             validate_profile(Profile(pose_quality="enormous"))

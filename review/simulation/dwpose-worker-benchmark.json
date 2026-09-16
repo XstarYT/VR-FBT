@@ -1,0 +1,31 @@
+{
+  "fixture": "Repeated saved image: review\\simulation\\frames\\camera-0-0360.jpg; inference plus local IPC only",
+  "quality": "dwpose",
+  "cameras": 3,
+  "frames_per_camera": 30,
+  "startup_seconds": 4.119,
+  "python": "3.12.9",
+  "camera_results": [
+    {
+      "camera": 1,
+      "detected_frames": 30,
+      "p50_ms": 80.549,
+      "p95_ms": 88.582,
+      "p99_ms": 89.964
+    },
+    {
+      "camera": 2,
+      "detected_frames": 30,
+      "p50_ms": 81.951,
+      "p95_ms": 89.92,
+      "p99_ms": 93.759
+    },
+    {
+      "camera": 3,
+      "detected_frames": 30,
+      "p50_ms": 78.897,
+      "p95_ms": 87.055,
+      "p99_ms": 88.804
+    }
+  ]
+}

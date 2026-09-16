@@ -1,0 +1,28 @@
+{
+  "fixture": "1280x720 black BGR images; no person; inference plus local IPC only",
+  "quality": "full",
+  "cameras": 3,
+  "frames_per_camera": 100,
+  "startup_seconds": 3.35,
+  "python": "3.12.9",
+  "camera_results": [
+    {
+      "camera": 1,
+      "p50_ms": 22.211,
+      "p95_ms": 26.725,
+      "p99_ms": 27.776
+    },
+    {
+      "camera": 2,
+      "p50_ms": 21.626,
+      "p95_ms": 27.706,
+      "p99_ms": 28.82
+    },
+    {
+      "camera": 3,
+      "p50_ms": 21.009,
+      "p95_ms": 25.86,
+      "p99_ms": 27.413
+    }
+  ]
+}

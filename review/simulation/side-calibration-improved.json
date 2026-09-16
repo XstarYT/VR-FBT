@@ -1,0 +1,17 @@
+{
+  "camera_count": 3,
+  "scenario": "normal",
+  "input": "rendered_detector",
+  "calibrated_at_s": null,
+  "calibration_hint": "Raise both arms into a T-pose and keep every limb visible",
+  "motion_frames": 236,
+  "detected_fraction": 0.0,
+  "eligible_joint_fraction": 0.0,
+  "within_20cm_fraction": 0.0,
+  "all_joint_error_m": null,
+  "eligible_joint_error_m": null,
+  "live_time_error_m": null,
+  "phase_error_m": {},
+  "max_selected_skew_ms": 0,
+  "acceptance_pass": false
+}

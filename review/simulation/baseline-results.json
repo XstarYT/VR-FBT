@@ -1,0 +1,598 @@
+{
+  "description": "Rendered Soldier model, 12s T-pose then 8s walk/run/half-turn, 960x720 at 15 FPS, real Full model, production 10s calibration and synchronizer.",
+  "threshold": "At least 90% of all motion-phase evaluated joints emitted at confidence >=0.5 and within 20cm; eligible-joint p95 <=20cm. Skeleton bone centers approximate anatomical landmarks.",
+  "detector": {
+    "0": {
+      "detection_fraction": 1.0,
+      "mean_confidence": 0.9264045489082734
+    },
+    "1": {
+      "detection_fraction": 0.9866666666666667,
+      "mean_confidence": 0.9421405012408892
+    },
+    "2": {
+      "detection_fraction": 1.0,
+      "mean_confidence": 0.8582080564710001
+    }
+  },
+  "results": [
+    {
+      "camera_count": 2,
+      "scenario": "normal",
+      "input": "exact_joints",
+      "calibrated_at_s": 10.1,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 1.0,
+      "within_20cm_fraction": 1.0,
+      "all_joint_error_m": {
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "live_time_error_m": {
+        "mean": 0.1324,
+        "p50": 0.1032,
+        "p95": 0.3262,
+        "max": 0.5823
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        },
+        "run": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        },
+        "turn": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": true
+    },
+    {
+      "camera_count": 2,
+      "scenario": "jitter",
+      "input": "exact_joints",
+      "calibrated_at_s": null,
+      "calibration_hint": "Raise both arms into a T-pose and keep every limb visible",
+      "motion_frames": 236,
+      "detected_fraction": 0.0,
+      "eligible_joint_fraction": 0.0,
+      "within_20cm_fraction": 0.0,
+      "all_joint_error_m": null,
+      "eligible_joint_error_m": null,
+      "live_time_error_m": null,
+      "phase_error_m": {},
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 2,
+      "scenario": "dropout",
+      "input": "exact_joints",
+      "calibrated_at_s": 10.1,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 1.0,
+      "within_20cm_fraction": 0.788135593220339,
+      "all_joint_error_m": {
+        "mean": 0.0875,
+        "p50": 0.0,
+        "p95": 0.4339,
+        "max": 0.4552
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0875,
+        "p50": 0.0,
+        "p95": 0.4339,
+        "max": 0.4552
+      },
+      "live_time_error_m": {
+        "mean": 0.1867,
+        "p50": 0.1221,
+        "p95": 0.4934,
+        "max": 0.9206
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        },
+        "run": {
+          "mean": 0.3443,
+          "p50": 0.3768,
+          "p95": 0.4494,
+          "max": 0.4552
+        },
+        "turn": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 2,
+      "scenario": "late",
+      "input": "exact_joints",
+      "calibrated_at_s": 10.1,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 1.0,
+      "within_20cm_fraction": 0.19491525423728814,
+      "all_joint_error_m": {
+        "mean": 0.2871,
+        "p50": 0.3103,
+        "p95": 0.3994,
+        "max": 0.4079
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.2871,
+        "p50": 0.3103,
+        "p95": 0.3994,
+        "max": 0.4079
+      },
+      "live_time_error_m": {
+        "mean": 0.315,
+        "p50": 0.326,
+        "p95": 0.5031,
+        "max": 0.7662
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.3094,
+          "p50": 0.3405,
+          "p95": 0.406,
+          "max": 0.4079
+        },
+        "run": {
+          "mean": 0.2846,
+          "p50": 0.3125,
+          "p95": 0.3805,
+          "max": 0.3907
+        },
+        "turn": {
+          "mean": 0.2774,
+          "p50": 0.2893,
+          "p95": 0.3996,
+          "max": 0.3999
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 2,
+      "scenario": "arrival_only",
+      "input": "exact_joints",
+      "calibrated_at_s": 10.266666666666667,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.9971751412429378,
+      "within_20cm_fraction": 0.989406779661017,
+      "all_joint_error_m": {
+        "mean": 0.0533,
+        "p50": 0.0395,
+        "p95": 0.1428,
+        "max": 0.2682
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.053,
+        "p50": 0.0395,
+        "p95": 0.1422,
+        "max": 0.2682
+      },
+      "live_time_error_m": {
+        "mean": 0.1896,
+        "p50": 0.1483,
+        "p95": 0.4499,
+        "max": 0.7544
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0373,
+          "p50": 0.032,
+          "p95": 0.0872,
+          "max": 0.1455
+        },
+        "run": {
+          "mean": 0.077,
+          "p50": 0.064,
+          "p95": 0.1807,
+          "max": 0.2682
+        },
+        "turn": {
+          "mean": 0.0486,
+          "p50": 0.0363,
+          "p95": 0.1324,
+          "max": 0.2678
+        }
+      },
+      "max_selected_skew_ms": 3.333,
+      "acceptance_pass": true
+    },
+    {
+      "camera_count": 3,
+      "scenario": "normal",
+      "input": "exact_joints",
+      "calibrated_at_s": 10.1,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 1.0,
+      "within_20cm_fraction": 1.0,
+      "all_joint_error_m": {
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "live_time_error_m": {
+        "mean": 0.1324,
+        "p50": 0.1032,
+        "p95": 0.3262,
+        "max": 0.5823
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        },
+        "run": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        },
+        "turn": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": true
+    },
+    {
+      "camera_count": 3,
+      "scenario": "jitter",
+      "input": "exact_joints",
+      "calibrated_at_s": null,
+      "calibration_hint": "Raise both arms into a T-pose and keep every limb visible",
+      "motion_frames": 236,
+      "detected_fraction": 0.0,
+      "eligible_joint_fraction": 0.0,
+      "within_20cm_fraction": 0.0,
+      "all_joint_error_m": null,
+      "eligible_joint_error_m": null,
+      "live_time_error_m": null,
+      "phase_error_m": {},
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 3,
+      "scenario": "dropout",
+      "input": "exact_joints",
+      "calibrated_at_s": 10.1,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 1.0,
+      "within_20cm_fraction": 1.0,
+      "all_joint_error_m": {
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "live_time_error_m": {
+        "mean": 0.1324,
+        "p50": 0.1032,
+        "p95": 0.3262,
+        "max": 0.5823
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        },
+        "run": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        },
+        "turn": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": true
+    },
+    {
+      "camera_count": 3,
+      "scenario": "late",
+      "input": "exact_joints",
+      "calibrated_at_s": 10.1,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 1.0,
+      "within_20cm_fraction": 1.0,
+      "all_joint_error_m": {
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "live_time_error_m": {
+        "mean": 0.1324,
+        "p50": 0.1032,
+        "p95": 0.3262,
+        "max": 0.5823
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        },
+        "run": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        },
+        "turn": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": true
+    },
+    {
+      "camera_count": 3,
+      "scenario": "arrival_only",
+      "input": "exact_joints",
+      "calibrated_at_s": null,
+      "calibration_hint": "Waiting for 1 camera(s) to see a pose",
+      "motion_frames": 236,
+      "detected_fraction": 0.0,
+      "eligible_joint_fraction": 0.0,
+      "within_20cm_fraction": 0.0,
+      "all_joint_error_m": null,
+      "eligible_joint_error_m": null,
+      "live_time_error_m": null,
+      "phase_error_m": {},
+      "max_selected_skew_ms": 30.0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 2,
+      "scenario": "normal",
+      "input": "rendered_detector",
+      "calibrated_at_s": null,
+      "calibration_hint": "Raise both arms into a T-pose and keep every limb visible",
+      "motion_frames": 236,
+      "detected_fraction": 0.0,
+      "eligible_joint_fraction": 0.0,
+      "within_20cm_fraction": 0.0,
+      "all_joint_error_m": null,
+      "eligible_joint_error_m": null,
+      "live_time_error_m": null,
+      "phase_error_m": {},
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 2,
+      "scenario": "jitter",
+      "input": "rendered_detector",
+      "calibrated_at_s": null,
+      "calibration_hint": "Raise both arms into a T-pose and keep every limb visible",
+      "motion_frames": 236,
+      "detected_fraction": 0.0,
+      "eligible_joint_fraction": 0.0,
+      "within_20cm_fraction": 0.0,
+      "all_joint_error_m": null,
+      "eligible_joint_error_m": null,
+      "live_time_error_m": null,
+      "phase_error_m": {},
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 2,
+      "scenario": "dropout",
+      "input": "rendered_detector",
+      "calibrated_at_s": null,
+      "calibration_hint": "Raise both arms into a T-pose and keep every limb visible",
+      "motion_frames": 236,
+      "detected_fraction": 0.0,
+      "eligible_joint_fraction": 0.0,
+      "within_20cm_fraction": 0.0,
+      "all_joint_error_m": null,
+      "eligible_joint_error_m": null,
+      "live_time_error_m": null,
+      "phase_error_m": {},
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 2,
+      "scenario": "late",
+      "input": "rendered_detector",
+      "calibrated_at_s": null,
+      "calibration_hint": "Waiting for 1 camera(s) to see a pose",
+      "motion_frames": 236,
+      "detected_fraction": 0.0,
+      "eligible_joint_fraction": 0.0,
+      "within_20cm_fraction": 0.0,
+      "all_joint_error_m": null,
+      "eligible_joint_error_m": null,
+      "live_time_error_m": null,
+      "phase_error_m": {},
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 2,
+      "scenario": "arrival_only",
+      "input": "rendered_detector",
+      "calibrated_at_s": null,
+      "calibration_hint": "Raise both arms into a T-pose and keep every limb visible",
+      "motion_frames": 236,
+      "detected_fraction": 0.0,
+      "eligible_joint_fraction": 0.0,
+      "within_20cm_fraction": 0.0,
+      "all_joint_error_m": null,
+      "eligible_joint_error_m": null,
+      "live_time_error_m": null,
+      "phase_error_m": {},
+      "max_selected_skew_ms": 3.333,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 3,
+      "scenario": "normal",
+      "input": "rendered_detector",
+      "calibrated_at_s": null,
+      "calibration_hint": "Raise both arms into a T-pose and keep every limb visible",
+      "motion_frames": 236,
+      "detected_fraction": 0.0,
+      "eligible_joint_fraction": 0.0,
+      "within_20cm_fraction": 0.0,
+      "all_joint_error_m": null,
+      "eligible_joint_error_m": null,
+      "live_time_error_m": null,
+      "phase_error_m": {},
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 3,
+      "scenario": "jitter",
+      "input": "rendered_detector",
+      "calibrated_at_s": null,
+      "calibration_hint": "Raise both arms into a T-pose and keep every limb visible",
+      "motion_frames": 236,
+      "detected_fraction": 0.0,
+      "eligible_joint_fraction": 0.0,
+      "within_20cm_fraction": 0.0,
+      "all_joint_error_m": null,
+      "eligible_joint_error_m": null,
+      "live_time_error_m": null,
+      "phase_error_m": {},
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 3,
+      "scenario": "dropout",
+      "input": "rendered_detector",
+      "calibrated_at_s": null,
+      "calibration_hint": "Raise both arms into a T-pose and keep every limb visible",
+      "motion_frames": 236,
+      "detected_fraction": 0.0,
+      "eligible_joint_fraction": 0.0,
+      "within_20cm_fraction": 0.0,
+      "all_joint_error_m": null,
+      "eligible_joint_error_m": null,
+      "live_time_error_m": null,
+      "phase_error_m": {},
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 3,
+      "scenario": "late",
+      "input": "rendered_detector",
+      "calibrated_at_s": null,
+      "calibration_hint": "Waiting for 1 camera(s) to see a pose",
+      "motion_frames": 236,
+      "detected_fraction": 0.0,
+      "eligible_joint_fraction": 0.0,
+      "within_20cm_fraction": 0.0,
+      "all_joint_error_m": null,
+      "eligible_joint_error_m": null,
+      "live_time_error_m": null,
+      "phase_error_m": {},
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 3,
+      "scenario": "arrival_only",
+      "input": "rendered_detector",
+      "calibrated_at_s": null,
+      "calibration_hint": "Waiting for 1 camera(s) to see a pose",
+      "motion_frames": 236,
+      "detected_fraction": 0.0,
+      "eligible_joint_fraction": 0.0,
+      "within_20cm_fraction": 0.0,
+      "all_joint_error_m": null,
+      "eligible_joint_error_m": null,
+      "live_time_error_m": null,
+      "phase_error_m": {},
+      "max_selected_skew_ms": 30.0,
+      "acceptance_pass": false
+    }
+  ]
+}

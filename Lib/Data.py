@@ -99,6 +99,9 @@ class Map:
         for name, index in self.JMap["KeyPoints"].items():
             x, y, z, visibility = landmark_list[index]
             point = self.KeyPoints[name]
+            if not all(math.isfinite(value) for value in (x, y, z, visibility)):
+                point.vis = 0.0
+                continue
             if visibility >= 0.35 or not point.his:
                 point.update([x, y, z], visibility, alpha)
                 point.append_history()

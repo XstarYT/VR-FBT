@@ -1,0 +1,1271 @@
+{
+  "description": "Rendered Soldier model, 24s T-pose then 8s walk/run/half-turn, 960x720 at 15 FPS, real Full model, production 10s calibration and synchronizer.",
+  "threshold": "At least 90% of all motion-phase evaluated joints emitted at confidence >=0.5 and within 20cm; eligible-joint p95 <=20cm. Skeleton bone centers approximate anatomical landmarks.",
+  "detector": {
+    "0": {
+      "detection_fraction": 1.0,
+      "mean_confidence": 0.9225801094279935
+    },
+    "1": {
+      "detection_fraction": 0.9979166666666667,
+      "mean_confidence": 0.9571311425572883
+    },
+    "2": {
+      "detection_fraction": 1.0,
+      "mean_confidence": 0.8392722147400491
+    }
+  },
+  "results": [
+    {
+      "camera_count": 2,
+      "scenario": "normal",
+      "input": "exact_joints",
+      "calibrated_at_s": 10.133333333333333,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 1.0,
+      "within_20cm_fraction": 1.0,
+      "all_joint_error_m": {
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "live_time_error_m": {
+        "mean": 0.1653,
+        "p50": 0.1295,
+        "p95": 0.4014,
+        "max": 0.775
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        },
+        "run": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        },
+        "turn": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": true
+    },
+    {
+      "camera_count": 2,
+      "scenario": "jitter",
+      "input": "exact_joints",
+      "calibrated_at_s": 10.166666666666666,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 1.0,
+      "within_20cm_fraction": 1.0,
+      "all_joint_error_m": {
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "live_time_error_m": {
+        "mean": 0.1938,
+        "p50": 0.1552,
+        "p95": 0.4609,
+        "max": 0.7815
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        },
+        "run": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        },
+        "turn": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": true
+    },
+    {
+      "camera_count": 2,
+      "scenario": "dropout",
+      "input": "exact_joints",
+      "calibrated_at_s": 10.133333333333333,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.7457627118644068,
+      "within_20cm_fraction": 0.7457627118644068,
+      "all_joint_error_m": {
+        "mean": 0.0875,
+        "p50": 0.0,
+        "p95": 0.4339,
+        "max": 0.4552
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "live_time_error_m": {
+        "mean": 0.2128,
+        "p50": 0.1537,
+        "p95": 0.5467,
+        "max": 1.0587
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        },
+        "run": null,
+        "turn": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 2,
+      "scenario": "late",
+      "input": "exact_joints",
+      "calibrated_at_s": 10.133333333333333,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.0,
+      "within_20cm_fraction": 0.0,
+      "all_joint_error_m": {
+        "mean": 0.2859,
+        "p50": 0.3103,
+        "p95": 0.3994,
+        "max": 0.4079
+      },
+      "eligible_joint_error_m": null,
+      "live_time_error_m": {
+        "mean": 0.3297,
+        "p50": 0.3349,
+        "p95": 0.5617,
+        "max": 0.9012
+      },
+      "phase_error_m": {
+        "walk": null,
+        "run": null,
+        "turn": null
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 2,
+      "scenario": "arrival_only",
+      "input": "exact_joints",
+      "calibrated_at_s": 10.266666666666667,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.9971751412429378,
+      "within_20cm_fraction": 0.989406779661017,
+      "all_joint_error_m": {
+        "mean": 0.0533,
+        "p50": 0.0395,
+        "p95": 0.1428,
+        "max": 0.2682
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.053,
+        "p50": 0.0395,
+        "p95": 0.1422,
+        "max": 0.2682
+      },
+      "live_time_error_m": {
+        "mean": 0.1943,
+        "p50": 0.1534,
+        "p95": 0.466,
+        "max": 0.8107
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0373,
+          "p50": 0.032,
+          "p95": 0.0872,
+          "max": 0.1455
+        },
+        "run": {
+          "mean": 0.077,
+          "p50": 0.064,
+          "p95": 0.1807,
+          "max": 0.2682
+        },
+        "turn": {
+          "mean": 0.0486,
+          "p50": 0.0363,
+          "p95": 0.1324,
+          "max": 0.2678
+        }
+      },
+      "max_selected_skew_ms": 3.333,
+      "acceptance_pass": true
+    },
+    {
+      "camera_count": 3,
+      "scenario": "normal",
+      "input": "exact_joints",
+      "calibrated_at_s": 10.133333333333333,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 1.0,
+      "within_20cm_fraction": 1.0,
+      "all_joint_error_m": {
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "live_time_error_m": {
+        "mean": 0.1653,
+        "p50": 0.1295,
+        "p95": 0.4014,
+        "max": 0.775
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        },
+        "run": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        },
+        "turn": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": true
+    },
+    {
+      "camera_count": 3,
+      "scenario": "jitter",
+      "input": "exact_joints",
+      "calibrated_at_s": 10.166666666666666,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 1.0,
+      "within_20cm_fraction": 1.0,
+      "all_joint_error_m": {
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "live_time_error_m": {
+        "mean": 0.1938,
+        "p50": 0.1552,
+        "p95": 0.4609,
+        "max": 0.7815
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        },
+        "run": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        },
+        "turn": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": true
+    },
+    {
+      "camera_count": 3,
+      "scenario": "dropout",
+      "input": "exact_joints",
+      "calibrated_at_s": 10.133333333333333,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 1.0,
+      "within_20cm_fraction": 1.0,
+      "all_joint_error_m": {
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "live_time_error_m": {
+        "mean": 0.1653,
+        "p50": 0.1295,
+        "p95": 0.4014,
+        "max": 0.775
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        },
+        "run": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        },
+        "turn": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": true
+    },
+    {
+      "camera_count": 3,
+      "scenario": "late",
+      "input": "exact_joints",
+      "calibrated_at_s": 10.133333333333333,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 1.0,
+      "within_20cm_fraction": 1.0,
+      "all_joint_error_m": {
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0
+      },
+      "live_time_error_m": {
+        "mean": 0.1653,
+        "p50": 0.1295,
+        "p95": 0.4014,
+        "max": 0.775
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        },
+        "run": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        },
+        "turn": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": true
+    },
+    {
+      "camera_count": 3,
+      "scenario": "arrival_only",
+      "input": "exact_joints",
+      "calibrated_at_s": null,
+      "calibration_hint": "Waiting for 1 camera(s) to see a pose",
+      "motion_frames": 236,
+      "detected_fraction": 0.0,
+      "eligible_joint_fraction": 0.0,
+      "within_20cm_fraction": 0.0,
+      "all_joint_error_m": null,
+      "eligible_joint_error_m": null,
+      "live_time_error_m": null,
+      "phase_error_m": {},
+      "max_selected_skew_ms": 30.0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 2,
+      "scenario": "normal",
+      "input": "rendered_detector",
+      "calibrated_at_s": 13.866666666666667,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.9134887005649718,
+      "within_20cm_fraction": 0.7383474576271186,
+      "all_joint_error_m": {
+        "mean": 0.1457,
+        "p50": 0.0815,
+        "p95": 0.4952,
+        "max": 0.88
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.1388,
+        "p50": 0.0777,
+        "p95": 0.4814,
+        "max": 0.88
+      },
+      "live_time_error_m": {
+        "mean": 0.2237,
+        "p50": 0.1729,
+        "p95": 0.5274,
+        "max": 0.91
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.1045,
+          "p50": 0.0703,
+          "p95": 0.4563,
+          "max": 0.8705
+        },
+        "run": {
+          "mean": 0.128,
+          "p50": 0.0726,
+          "p95": 0.47,
+          "max": 0.88
+        },
+        "turn": {
+          "mean": 0.1638,
+          "p50": 0.0937,
+          "p95": 0.5106,
+          "max": 0.8593
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 2,
+      "scenario": "jitter",
+      "input": "rendered_detector",
+      "calibrated_at_s": 13.9,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.91454802259887,
+      "within_20cm_fraction": 0.7401129943502824,
+      "all_joint_error_m": {
+        "mean": 0.1451,
+        "p50": 0.0813,
+        "p95": 0.4876,
+        "max": 0.88
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.1384,
+        "p50": 0.0777,
+        "p95": 0.4804,
+        "max": 0.88
+      },
+      "live_time_error_m": {
+        "mean": 0.2396,
+        "p50": 0.1909,
+        "p95": 0.546,
+        "max": 0.9357
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.104,
+          "p50": 0.0701,
+          "p95": 0.4547,
+          "max": 0.8705
+        },
+        "run": {
+          "mean": 0.128,
+          "p50": 0.0726,
+          "p95": 0.47,
+          "max": 0.88
+        },
+        "turn": {
+          "mean": 0.1637,
+          "p50": 0.0937,
+          "p95": 0.5094,
+          "max": 0.8593
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 2,
+      "scenario": "dropout",
+      "input": "rendered_detector",
+      "calibrated_at_s": 13.866666666666667,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.6620762711864406,
+      "within_20cm_fraction": 0.524364406779661,
+      "all_joint_error_m": {
+        "mean": 0.2349,
+        "p50": 0.1232,
+        "p95": 0.666,
+        "max": 1.0558
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.143,
+        "p50": 0.0806,
+        "p95": 0.499,
+        "max": 0.8705
+      },
+      "live_time_error_m": {
+        "mean": 0.2911,
+        "p50": 0.2198,
+        "p95": 0.7073,
+        "max": 1.1092
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.1045,
+          "p50": 0.0703,
+          "p95": 0.4563,
+          "max": 0.8705
+        },
+        "run": null,
+        "turn": {
+          "mean": 0.1638,
+          "p50": 0.0937,
+          "p95": 0.5106,
+          "max": 0.8593
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 2,
+      "scenario": "late",
+      "input": "rendered_detector",
+      "calibrated_at_s": 13.866666666666667,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.0,
+      "within_20cm_fraction": 0.0,
+      "all_joint_error_m": {
+        "mean": 0.4805,
+        "p50": 0.465,
+        "p95": 0.8436,
+        "max": 1.2638
+      },
+      "eligible_joint_error_m": null,
+      "live_time_error_m": {
+        "mean": 0.4725,
+        "p50": 0.4552,
+        "p95": 0.829,
+        "max": 1.1529
+      },
+      "phase_error_m": {
+        "walk": null,
+        "run": null,
+        "turn": null
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 2,
+      "scenario": "arrival_only",
+      "input": "rendered_detector",
+      "calibrated_at_s": 14.0,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.9014830508474576,
+      "within_20cm_fraction": 0.6995056497175142,
+      "all_joint_error_m": {
+        "mean": 0.1645,
+        "p50": 0.1093,
+        "p95": 0.4917,
+        "max": 0.8923
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.1577,
+        "p50": 0.1038,
+        "p95": 0.4872,
+        "max": 0.8923
+      },
+      "live_time_error_m": {
+        "mean": 0.2392,
+        "p50": 0.1892,
+        "p95": 0.5512,
+        "max": 0.8595
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.1186,
+          "p50": 0.0836,
+          "p95": 0.468,
+          "max": 0.8923
+        },
+        "run": {
+          "mean": 0.16,
+          "p50": 0.1157,
+          "p95": 0.4608,
+          "max": 0.6801
+        },
+        "turn": {
+          "mean": 0.1772,
+          "p50": 0.1175,
+          "p95": 0.5074,
+          "max": 0.8102
+        }
+      },
+      "max_selected_skew_ms": 3.333,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 3,
+      "scenario": "normal",
+      "input": "rendered_detector",
+      "calibrated_at_s": null,
+      "calibration_hint": "Raise both arms into a T-pose and keep every limb visible",
+      "motion_frames": 236,
+      "detected_fraction": 0.0,
+      "eligible_joint_fraction": 0.0,
+      "within_20cm_fraction": 0.0,
+      "all_joint_error_m": null,
+      "eligible_joint_error_m": null,
+      "live_time_error_m": null,
+      "phase_error_m": {},
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 3,
+      "scenario": "jitter",
+      "input": "rendered_detector",
+      "calibrated_at_s": null,
+      "calibration_hint": "Raise both arms into a T-pose and keep every limb visible",
+      "motion_frames": 236,
+      "detected_fraction": 0.0,
+      "eligible_joint_fraction": 0.0,
+      "within_20cm_fraction": 0.0,
+      "all_joint_error_m": null,
+      "eligible_joint_error_m": null,
+      "live_time_error_m": null,
+      "phase_error_m": {},
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 3,
+      "scenario": "dropout",
+      "input": "rendered_detector",
+      "calibrated_at_s": null,
+      "calibration_hint": "Raise both arms into a T-pose and keep every limb visible",
+      "motion_frames": 236,
+      "detected_fraction": 0.0,
+      "eligible_joint_fraction": 0.0,
+      "within_20cm_fraction": 0.0,
+      "all_joint_error_m": null,
+      "eligible_joint_error_m": null,
+      "live_time_error_m": null,
+      "phase_error_m": {},
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 3,
+      "scenario": "late",
+      "input": "rendered_detector",
+      "calibrated_at_s": null,
+      "calibration_hint": "Waiting for 1 camera(s) to see a pose",
+      "motion_frames": 236,
+      "detected_fraction": 0.0,
+      "eligible_joint_fraction": 0.0,
+      "within_20cm_fraction": 0.0,
+      "all_joint_error_m": null,
+      "eligible_joint_error_m": null,
+      "live_time_error_m": null,
+      "phase_error_m": {},
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 3,
+      "scenario": "arrival_only",
+      "input": "rendered_detector",
+      "calibrated_at_s": null,
+      "calibration_hint": "Waiting for 1 camera(s) to see a pose",
+      "motion_frames": 236,
+      "detected_fraction": 0.0,
+      "eligible_joint_fraction": 0.0,
+      "within_20cm_fraction": 0.0,
+      "all_joint_error_m": null,
+      "eligible_joint_error_m": null,
+      "live_time_error_m": null,
+      "phase_error_m": {},
+      "max_selected_skew_ms": 30.0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 2,
+      "scenario": "normal",
+      "input": "rendered_known_geometry",
+      "calibrated_at_s": 0.0,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.8951271186440678,
+      "within_20cm_fraction": 0.7870762711864406,
+      "all_joint_error_m": {
+        "mean": 0.1233,
+        "p50": 0.0777,
+        "p95": 0.4351,
+        "max": 0.7438
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.1105,
+        "p50": 0.0734,
+        "p95": 0.4218,
+        "max": 0.7438
+      },
+      "live_time_error_m": {
+        "mean": 0.2125,
+        "p50": 0.171,
+        "p95": 0.4971,
+        "max": 1.0835
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0859,
+          "p50": 0.0688,
+          "p95": 0.229,
+          "max": 0.6229
+        },
+        "run": {
+          "mean": 0.0872,
+          "p50": 0.0701,
+          "p95": 0.1951,
+          "max": 0.5741
+        },
+        "turn": {
+          "mean": 0.1385,
+          "p50": 0.0819,
+          "p95": 0.4653,
+          "max": 0.7438
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 2,
+      "scenario": "jitter",
+      "input": "rendered_known_geometry",
+      "calibrated_at_s": 0.0,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.8961864406779662,
+      "within_20cm_fraction": 0.7888418079096046,
+      "all_joint_error_m": {
+        "mean": 0.1226,
+        "p50": 0.0776,
+        "p95": 0.4341,
+        "max": 0.7438
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.11,
+        "p50": 0.0734,
+        "p95": 0.4191,
+        "max": 0.7438
+      },
+      "live_time_error_m": {
+        "mean": 0.2299,
+        "p50": 0.1851,
+        "p95": 0.5247,
+        "max": 1.0835
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0857,
+          "p50": 0.0687,
+          "p95": 0.2275,
+          "max": 0.6229
+        },
+        "run": {
+          "mean": 0.0872,
+          "p50": 0.0701,
+          "p95": 0.1951,
+          "max": 0.5741
+        },
+        "turn": {
+          "mean": 0.1381,
+          "p50": 0.0818,
+          "p95": 0.4647,
+          "max": 0.7438
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 2,
+      "scenario": "dropout",
+      "input": "rendered_known_geometry",
+      "calibrated_at_s": 0.0,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.6444209039548022,
+      "within_20cm_fraction": 0.5476694915254238,
+      "all_joint_error_m": {
+        "mean": 0.2171,
+        "p50": 0.112,
+        "p95": 0.5994,
+        "max": 0.9602
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.1196,
+        "p50": 0.0761,
+        "p95": 0.4393,
+        "max": 0.7438
+      },
+      "live_time_error_m": {
+        "mean": 0.2728,
+        "p50": 0.2047,
+        "p95": 0.6919,
+        "max": 1.4031
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0859,
+          "p50": 0.0688,
+          "p95": 0.229,
+          "max": 0.6229
+        },
+        "run": null,
+        "turn": {
+          "mean": 0.1385,
+          "p50": 0.0819,
+          "p95": 0.4653,
+          "max": 0.7438
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 2,
+      "scenario": "late",
+      "input": "rendered_known_geometry",
+      "calibrated_at_s": 0.0,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.0,
+      "within_20cm_fraction": 0.0,
+      "all_joint_error_m": {
+        "mean": 0.3434,
+        "p50": 0.3365,
+        "p95": 0.5937,
+        "max": 0.9473
+      },
+      "eligible_joint_error_m": null,
+      "live_time_error_m": {
+        "mean": 0.3694,
+        "p50": 0.354,
+        "p95": 0.6544,
+        "max": 1.0245
+      },
+      "phase_error_m": {
+        "walk": null,
+        "run": null,
+        "turn": null
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 2,
+      "scenario": "arrival_only",
+      "input": "rendered_known_geometry",
+      "calibrated_at_s": 0.0,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.8817090395480226,
+      "within_20cm_fraction": 0.7492937853107344,
+      "all_joint_error_m": {
+        "mean": 0.1434,
+        "p50": 0.1039,
+        "p95": 0.4207,
+        "max": 0.7241
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.131,
+        "p50": 0.0965,
+        "p95": 0.3902,
+        "max": 0.7241
+      },
+      "live_time_error_m": {
+        "mean": 0.2283,
+        "p50": 0.1838,
+        "p95": 0.5196,
+        "max": 1.0946
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.1011,
+          "p50": 0.0824,
+          "p95": 0.2307,
+          "max": 0.6003
+        },
+        "run": {
+          "mean": 0.1191,
+          "p50": 0.1067,
+          "p95": 0.2654,
+          "max": 0.4186
+        },
+        "turn": {
+          "mean": 0.1544,
+          "p50": 0.108,
+          "p95": 0.4739,
+          "max": 0.7241
+        }
+      },
+      "max_selected_skew_ms": 3.333,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 3,
+      "scenario": "normal",
+      "input": "rendered_known_geometry",
+      "calibrated_at_s": 0.0,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.876412429378531,
+      "within_20cm_fraction": 0.7990819209039548,
+      "all_joint_error_m": {
+        "mean": 0.1098,
+        "p50": 0.0712,
+        "p95": 0.3991,
+        "max": 0.7081
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0957,
+        "p50": 0.0651,
+        "p95": 0.377,
+        "max": 0.6682
+      },
+      "live_time_error_m": {
+        "mean": 0.2006,
+        "p50": 0.1616,
+        "p95": 0.4743,
+        "max": 1.0793
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.099,
+          "p50": 0.0624,
+          "p95": 0.4178,
+          "max": 0.6168
+        },
+        "run": {
+          "mean": 0.0787,
+          "p50": 0.0632,
+          "p95": 0.1487,
+          "max": 0.5892
+        },
+        "turn": {
+          "mean": 0.104,
+          "p50": 0.0674,
+          "p95": 0.3999,
+          "max": 0.6682
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 3,
+      "scenario": "jitter",
+      "input": "rendered_known_geometry",
+      "calibrated_at_s": 0.0,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.8771186440677966,
+      "within_20cm_fraction": 0.8008474576271186,
+      "all_joint_error_m": {
+        "mean": 0.1092,
+        "p50": 0.0711,
+        "p95": 0.3948,
+        "max": 0.7081
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0954,
+        "p50": 0.065,
+        "p95": 0.3768,
+        "max": 0.6682
+      },
+      "live_time_error_m": {
+        "mean": 0.2183,
+        "p50": 0.1782,
+        "p95": 0.4988,
+        "max": 1.0793
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0989,
+          "p50": 0.063,
+          "p95": 0.4178,
+          "max": 0.6168
+        },
+        "run": {
+          "mean": 0.0787,
+          "p50": 0.0632,
+          "p95": 0.1487,
+          "max": 0.5892
+        },
+        "turn": {
+          "mean": 0.1032,
+          "p50": 0.0671,
+          "p95": 0.3966,
+          "max": 0.6682
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 3,
+      "scenario": "dropout",
+      "input": "rendered_known_geometry",
+      "calibrated_at_s": 0.0,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.8813559322033898,
+      "within_20cm_fraction": 0.794138418079096,
+      "all_joint_error_m": {
+        "mean": 0.1134,
+        "p50": 0.0734,
+        "p95": 0.4028,
+        "max": 0.7081
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0997,
+        "p50": 0.0675,
+        "p95": 0.377,
+        "max": 0.6682
+      },
+      "live_time_error_m": {
+        "mean": 0.2015,
+        "p50": 0.1628,
+        "p95": 0.4813,
+        "max": 1.1215
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.099,
+          "p50": 0.0624,
+          "p95": 0.4178,
+          "max": 0.6168
+        },
+        "run": {
+          "mean": 0.0933,
+          "p50": 0.0707,
+          "p95": 0.2463,
+          "max": 0.5775
+        },
+        "turn": {
+          "mean": 0.104,
+          "p50": 0.0674,
+          "p95": 0.3999,
+          "max": 0.6682
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 3,
+      "scenario": "late",
+      "input": "rendered_known_geometry",
+      "calibrated_at_s": 0.0,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.8894774011299436,
+      "within_20cm_fraction": 0.725635593220339,
+      "all_joint_error_m": {
+        "mean": 0.1499,
+        "p50": 0.0982,
+        "p95": 0.484,
+        "max": 0.8496
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.1367,
+        "p50": 0.0918,
+        "p95": 0.4464,
+        "max": 0.8303
+      },
+      "live_time_error_m": {
+        "mean": 0.2276,
+        "p50": 0.1868,
+        "p95": 0.533,
+        "max": 1.1215
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.1616,
+          "p50": 0.1143,
+          "p95": 0.4846,
+          "max": 0.7378
+        },
+        "run": {
+          "mean": 0.0933,
+          "p50": 0.0707,
+          "p95": 0.2463,
+          "max": 0.5775
+        },
+        "turn": {
+          "mean": 0.1485,
+          "p50": 0.0963,
+          "p95": 0.4944,
+          "max": 0.8303
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 3,
+      "scenario": "arrival_only",
+      "input": "rendered_known_geometry",
+      "calibrated_at_s": 0.0,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.8661723163841808,
+      "within_20cm_fraction": 0.7598870056497176,
+      "all_joint_error_m": {
+        "mean": 0.1327,
+        "p50": 0.0946,
+        "p95": 0.4036,
+        "max": 0.7241
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.1198,
+        "p50": 0.0878,
+        "p95": 0.3831,
+        "max": 0.7241
+      },
+      "live_time_error_m": {
+        "mean": 0.2201,
+        "p50": 0.1786,
+        "p95": 0.5071,
+        "max": 1.0882
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.1051,
+          "p50": 0.0805,
+          "p95": 0.3613,
+          "max": 0.6056
+        },
+        "run": {
+          "mean": 0.1082,
+          "p50": 0.0929,
+          "p95": 0.2386,
+          "max": 0.6117
+        },
+        "turn": {
+          "mean": 0.1347,
+          "p50": 0.093,
+          "p95": 0.4337,
+          "max": 0.7241
+        }
+      },
+      "max_selected_skew_ms": 30.0,
+      "acceptance_pass": false
+    }
+  ]
+}

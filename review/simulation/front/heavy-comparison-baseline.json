@@ -1,0 +1,312 @@
+{
+  "quality": "heavy",
+  "model_sha256": "64437af838a65d18e5ba7a0d39b465540069bc8aae8308de3e318aad31fcbc7b",
+  "inference_ms": {
+    "mean": 50.6504,
+    "p50": 46.6303,
+    "p95": 66.0358,
+    "max": 382.4738
+  },
+  "fusion": [
+    {
+      "camera_count": 2,
+      "scenario": "normal",
+      "input": "rendered_detector",
+      "calibrated_at_s": 14.333333333333334,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.9336158192090396,
+      "within_20cm_fraction": 0.690677966101695,
+      "all_joint_error_m": {
+        "mean": 0.1884,
+        "p50": 0.0812,
+        "p95": 0.6368,
+        "max": 1.1021
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.1829,
+        "p50": 0.0778,
+        "p95": 0.6429,
+        "max": 1.1021
+      },
+      "live_time_error_m": {
+        "mean": 0.2492,
+        "p50": 0.1832,
+        "p95": 0.605,
+        "max": 1.0194
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.1597,
+          "p50": 0.0726,
+          "p95": 0.5569,
+          "max": 1.0002
+        },
+        "run": {
+          "mean": 0.1868,
+          "p50": 0.0713,
+          "p95": 0.6719,
+          "max": 1.0109
+        },
+        "turn": {
+          "mean": 0.1934,
+          "p50": 0.0875,
+          "p95": 0.6659,
+          "max": 1.1021
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 3,
+      "scenario": "normal",
+      "input": "rendered_detector",
+      "calibrated_at_s": 14.333333333333334,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.9011299435028248,
+      "within_20cm_fraction": 0.6747881355932204,
+      "all_joint_error_m": {
+        "mean": 0.1839,
+        "p50": 0.0794,
+        "p95": 0.6296,
+        "max": 1.0075
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.1787,
+        "p50": 0.0743,
+        "p95": 0.6521,
+        "max": 1.0075
+      },
+      "live_time_error_m": {
+        "mean": 0.2462,
+        "p50": 0.182,
+        "p95": 0.6021,
+        "max": 0.9583
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.1653,
+          "p50": 0.07,
+          "p95": 0.5827,
+          "max": 1.0016
+        },
+        "run": {
+          "mean": 0.1838,
+          "p50": 0.0694,
+          "p95": 0.6716,
+          "max": 1.0075
+        },
+        "turn": {
+          "mean": 0.1833,
+          "p50": 0.0801,
+          "p95": 0.6602,
+          "max": 0.9392
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    }
+  ],
+  "joints": {
+    "LeftArm": {
+      "image_error_px": {
+        "mean": 18.6007,
+        "p50": 17.0381,
+        "p95": 32.5577,
+        "max": 80.8925
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.0954,
+        "p50": 0.0781,
+        "p95": 0.2575,
+        "max": 0.3811
+      }
+    },
+    "RightArm": {
+      "image_error_px": {
+        "mean": 19.8099,
+        "p50": 18.0475,
+        "p95": 34.405,
+        "max": 83.5917
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.0959,
+        "p50": 0.0784,
+        "p95": 0.284,
+        "max": 0.3794
+      }
+    },
+    "LeftForeArm": {
+      "image_error_px": {
+        "mean": 13.2322,
+        "p50": 11.3094,
+        "p95": 29.2772,
+        "max": 113.4519
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.066,
+        "p50": 0.0616,
+        "p95": 0.118,
+        "max": 0.2441
+      }
+    },
+    "RightForeArm": {
+      "image_error_px": {
+        "mean": 17.4984,
+        "p50": 11.9385,
+        "p95": 51.1647,
+        "max": 128.3806
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.0972,
+        "p50": 0.0556,
+        "p95": 0.3843,
+        "max": 0.5155
+      }
+    },
+    "LeftHand": {
+      "image_error_px": {
+        "mean": 22.8142,
+        "p50": 10.1977,
+        "p95": 81.2057,
+        "max": 170.5363
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.1368,
+        "p50": 0.0975,
+        "p95": 0.3365,
+        "max": 1.6498
+      }
+    },
+    "RightHand": {
+      "image_error_px": {
+        "mean": 25.9723,
+        "p50": 8.8129,
+        "p95": 107.8194,
+        "max": 169.5687
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.1588,
+        "p50": 0.0635,
+        "p95": 0.595,
+        "max": 1.7276
+      }
+    },
+    "LeftUpLeg": {
+      "image_error_px": {
+        "mean": 9.2013,
+        "p50": 7.9375,
+        "p95": 20.9475,
+        "max": 55.7448
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.0559,
+        "p50": 0.0496,
+        "p95": 0.126,
+        "max": 0.2396
+      }
+    },
+    "RightUpLeg": {
+      "image_error_px": {
+        "mean": 9.1819,
+        "p50": 7.6,
+        "p95": 21.8416,
+        "max": 50.3891
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.0524,
+        "p50": 0.0427,
+        "p95": 0.1301,
+        "max": 0.1888
+      }
+    },
+    "LeftLeg": {
+      "image_error_px": {
+        "mean": 14.5116,
+        "p50": 10.1798,
+        "p95": 41.8801,
+        "max": 89.55
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.0871,
+        "p50": 0.0628,
+        "p95": 0.2919,
+        "max": 0.4054
+      }
+    },
+    "RightLeg": {
+      "image_error_px": {
+        "mean": 17.3378,
+        "p50": 14.3516,
+        "p95": 38.4289,
+        "max": 98.5181
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.0959,
+        "p50": 0.0793,
+        "p95": 0.2376,
+        "max": 0.4104
+      }
+    },
+    "LeftFoot": {
+      "image_error_px": {
+        "mean": 19.5716,
+        "p50": 9.835,
+        "p95": 82.0506,
+        "max": 164.6948
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.1411,
+        "p50": 0.0691,
+        "p95": 0.5795,
+        "max": 0.8632
+      }
+    },
+    "RightFoot": {
+      "image_error_px": {
+        "mean": 20.8038,
+        "p50": 10.4654,
+        "p95": 88.7899,
+        "max": 170.0693
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.1459,
+        "p50": 0.0791,
+        "p95": 0.4898,
+        "max": 0.8655
+      }
+    },
+    "LeftToeBase": {
+      "image_error_px": {
+        "mean": 24.8141,
+        "p50": 12.9651,
+        "p95": 104.0718,
+        "max": 202.1637
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.1754,
+        "p50": 0.0768,
+        "p95": 0.7331,
+        "max": 1.0571
+      }
+    },
+    "RightToeBase": {
+      "image_error_px": {
+        "mean": 24.2474,
+        "p50": 12.2853,
+        "p95": 102.1168,
+        "max": 205.2964
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.1776,
+        "p50": 0.0914,
+        "p95": 0.6491,
+        "max": 1.0074
+      }
+    }
+  }
+}

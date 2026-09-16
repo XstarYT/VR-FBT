@@ -15,7 +15,7 @@ elements.video.play = async () => {};
 elements.video.videoWidth = 1920;
 elements.video.videoHeight = 1080;
 elements.canvas.getContext = () => ({drawImage() {}});
-elements.canvas.toBlob = fn => fn({size: 100});
+elements.canvas.toBlob = fn => fn(new Blob(['jpeg']));
 elements.fps.value = '15'; elements.quality.value = '0.7';
 let permissionResolve;
 const sockets = [];
@@ -26,6 +26,7 @@ class Socket {
   send(blob) { this.lastSent = blob; }
 }
 let timerId = 0;
+let clockMs = 1000;
 const timers = new Map();
 const context = {
   document: {getElementById: element, createElement: () => ({})},
@@ -36,6 +37,7 @@ const context = {
     getUserMedia: () => new Promise(resolve => { permissionResolve = resolve; })}},
   localStorage: {getItem() { throw Error('storage disabled'); }},
   crypto: {randomUUID: () => 'test-phone'}, URLSearchParams, WebSocket: Socket,
+  performance: {now: () => clockMs}, Blob,
   setInterval: fn => { timers.set(++timerId, fn); return timerId; },
   setTimeout: fn => { timers.set(++timerId, fn); return timerId; },
   clearInterval: id => timers.delete(id), clearTimeout: id => timers.delete(id),
@@ -59,14 +61,48 @@ function camera() {
   sockets[0].readyState = 1; sockets[0].onopen();
   assert.equal(elements.status.textContent, 'CONNECTED');
   assert.equal(elements.empty.hidden, true);
+  const clockRequest = JSON.parse(sockets[0].lastSent);
+  assert.equal(clockRequest.type, 'clock');
   for (const fn of [...timers.values()]) fn();
-  assert.ok(sockets[0].lastSent);
+  assert.equal(typeof sockets[0].lastSent, 'string', 'No untimed JPEG before clock synchronization');
+  clockMs = 1010;
+  sockets[0].onmessage({data: JSON.stringify({type: 'clock', client: clockRequest.client, server: 100.005})});
+  for (const fn of [...timers.values()]) fn();
+  assert.ok(sockets[0].lastSent instanceof Blob);
+  const packet = new DataView(await sockets[0].lastSent.arrayBuffer());
+  assert.equal(packet.getUint32(0), 0x56465431);
+  assert.ok(Math.abs(packet.getFloat64(4) - 100.01) < 1e-6);
+  assert.ok(Math.abs(packet.getFloat64(12) - 0.005) < 1e-6);
   assert.equal(elements.canvas.width, 1920);
   assert.equal(elements.canvas.height, 1080);
   elements.stop.handlers.click();
   assert.equal(second.track.stopped, true);
   assert.equal(elements.status.textContent, 'OFFLINE');
   assert.equal(elements.start.disabled, false);
+  assert.equal(timers.size, 0);
+  // The real video callback must stamp the captured frame, not JPEG completion.
+  const videoCallbacks = new Map();
+  let frameId = 0, finishEncoding;
+  elements.video.requestVideoFrameCallback = fn => { videoCallbacks.set(++frameId, fn); return frameId; };
+  elements.video.cancelVideoFrameCallback = id => videoCallbacks.delete(id);
+  elements.canvas.toBlob = fn => { finishEncoding = fn; };
+  clockMs = 2000;
+  const thirdStart = elements.start.handlers.click();
+  const third = camera(); permissionResolve(third); await thirdStart;
+  const timedSocket = sockets[1];
+  timedSocket.readyState = 1; timedSocket.onopen();
+  const request = JSON.parse(timedSocket.lastSent);
+  clockMs = 2010;
+  timedSocket.onmessage({data: JSON.stringify({type: 'clock', client: request.client, server: 200.005})});
+  clockMs = 2070;
+  const [callbackId, callback] = [...videoCallbacks][0]; videoCallbacks.delete(callbackId);
+  callback(clockMs, {captureTime: 2030, presentationTime: 2060});
+  clockMs = 2200;
+  finishEncoding(new Blob(['late-encoded-jpeg']));
+  const timedPacket = new DataView(await timedSocket.lastSent.arrayBuffer());
+  assert.ok(Math.abs(timedPacket.getFloat64(4) - 200.030) < 1e-6);
+  elements.stop.handlers.click();
+  assert.equal(videoCallbacks.size, 0);
   assert.equal(timers.size, 0);
   console.log('PASS: Private browsing, cancel during permission, fragment token, WSS streaming and Stop cleanup');
 })().catch(error => { console.error(error); process.exitCode = 1; });

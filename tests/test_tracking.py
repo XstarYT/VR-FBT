@@ -212,12 +212,19 @@ class MediaPipeTrackingTests(unittest.TestCase):
 
         corrupted = body.copy()
         corrupted[15] = (18.0, 5.0, 12.0)  # perfect ray intersection, impossible human/room location
-        corrupted[27] = (-15.0, 4.0, 11.0)  # core ankle fallback must still permit calibration
+        corrupted[27] = (-15.0, 4.0, 11.0)  # no confident output when every ankle ray contradicts the body fallback
         result = fusion.update(observations(corrupted), cv2)
         wrist = np.asarray(result.pose.world_landmarks[15][:3])
         self.assertLess(float(np.linalg.norm(wrist - body[15])), 0.5)
         self.assertLess(abs(float(wrist[0])), 3.5)
-        self.assertGreaterEqual(result.pose.world_landmarks[27][3], 0.55)
+        self.assertLess(result.pose.world_landmarks[27][3], 0.5)
+
+        # Losing the second view while the person moves must not emit the old
+        # room translation at high confidence, even with excellent 2D visibility.
+        result = fusion.update(observations(body + (0.7, 0, 0))[:1], cv2)
+        self.assertTrue(all(point[3] < 0.5 for point in result.pose.world_landmarks))
+        recovered = fusion.update(observations(body), cv2)
+        self.assertGreaterEqual(recovered.pose.world_landmarks[27][3], 0.55)
 
     def test_one_corner_camera_stays_fixed_while_skeleton_moves_in_room(self):
         import cv2

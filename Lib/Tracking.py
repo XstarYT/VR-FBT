@@ -67,6 +67,7 @@ class FusionResult:
     contributing_cameras: int
     calibration_hint: str = ""
     room_floor: float | None = None
+    safety_paused: bool = False
 
 
 class MultiCameraPoseFusion:
@@ -149,6 +150,10 @@ class MultiCameraPoseFusion:
         self._last_valid_calibration_at = None
         self._calibration_valid_elapsed = 0.0
         self._calibration_hint = "Stand in a T-pose where every camera sees your full body"
+        self._calibration_interrupted = False
+        self._last_calibration_captures = {}
+        from Lib.GeometryHealth import GeometryHealth
+        self._geometry_health = GeometryHealth()
 
     def update(self, observations: Sequence[CameraObservation], cv2_module) -> FusionResult:
         usable = [
@@ -157,6 +162,14 @@ class MultiCameraPoseFusion:
             and len(item.pose.image_landmarks) >= 31 and len(item.pose.world_landmarks) >= 31
         ]
         usable.sort(key=lambda item: self.source_ids.index(item.source_id))
+        try:
+            from Lib.Lens import rectify_observation
+            usable = [rectify_observation(item, self.camera_setups[item.source_id], cv2_module)
+                      if item.source_id in self.camera_setups and self.camera_setups[item.source_id].lens_intrinsics else item
+                      for item in usable]
+        except ValueError as exc:
+            return FusionResult(PoseResult(False, 0., [], []), self._camera_poses(), self.calibrated,
+                                self.calibration_progress, 0, str(exc), self._room_floor, True)
         if len(self.source_ids) > 1 and not self.calibrated:
             # Missing observations are part of the calibration state machine;
             # returning before this call used to credit dropout time.
@@ -175,15 +188,30 @@ class MultiCameraPoseFusion:
             # calibration gathers enough stable samples.
             return FusionResult(usable[0].pose, camera_poses, False, self.calibration_progress, 1, self._calibration_hint, self._room_floor)
 
-        fused = self._triangulate(usable, cv2_module)
-        return FusionResult(fused, camera_poses, True, self.calibration_progress, len(usable), "", self._room_floor)
+        projections, positions = self._projection_geometry(usable, cv2_module)
+        usable, warning, paused = self._geometry_health.filter(usable, projections, positions, self._clock())
+        if paused:
+            self._last_body_transform = None
+            self._last_points.clear()
+            self._last_point_times.clear()
+            fused = PoseResult(False, 0., [], [])
+        else:
+            fused = self._triangulate(usable, cv2_module)
+        return FusionResult(fused, camera_poses, True, self.calibration_progress, len(usable), warning, self._room_floor, paused)
 
     def _camera_matrix(self, size, np, source_id: str | None = None):
         width, height = size
         field_of_view = self.horizontal_fov_degrees
         if source_id in self.camera_setups:
             field_of_view = float(self.camera_setups[source_id].horizontal_fov)
-        focal = width / (2.0 * math.tan(math.radians(field_of_view) / 2.0))
+        setup = self.camera_setups.get(source_id)
+        if setup and setup.lens_intrinsics:
+            from Lib.Lens import geometry
+            return geometry(setup, size)[2]
+        # The configured horizontal FOV refers to the native camera image.
+        # A quarter turn swaps its horizontal dimension into the image height.
+        native_width = height if setup and setup.image_rotation in {90, 270} else width
+        focal = native_width / (2.0 * math.tan(math.radians(field_of_view) / 2.0))
         return np.array(((focal, 0.0, width / 2.0), (0.0, focal, height / 2.0), (0.0, 0.0, 1.0)), dtype=np.float64)
 
     @staticmethod
@@ -372,6 +400,55 @@ class MultiCameraPoseFusion:
                 return False
         return True
 
+    def _is_multiview_t_pose(self, observations) -> bool:
+        """Verify the pose jointly when a known rig sees occluded limbs.
+
+        Every required joint needs two confident rays. Every selected source
+        still needs enough visible body landmarks for its own alignment fit.
+        Unknown camera geometry cannot use this test before calibration.
+        """
+        import numpy as np
+        if not self.manual_camera_setup or len(observations) < 2:
+            return False
+        required = (11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28)
+        projections = {}
+        for observation in observations:
+            visible = {index for index in required if observation.pose.world_landmarks[index][3] >= .55}
+            if len(visible) < 6 or len(visible & {11, 12, 23, 24}) < 3 or not visible & {25, 26, 27, 28}:
+                return False
+            rotation, translation, _, _ = self._manual_camera_geometry(self.camera_setups[observation.source_id], np)
+            projections[observation.source_id] = self._camera_matrix(observation.frame_size, np, observation.source_id) @ np.column_stack((rotation, translation))
+        points = [[0., 0., 0., 0.] for _ in range(31)]
+        for index in required:
+            rays, rows = [], []
+            for observation in observations:
+                x, y, _, visibility = observation.pose.image_landmarks[index]
+                if visibility < .55 or not all(math.isfinite(value) for value in (x, y, visibility)):
+                    continue
+                width, height = observation.frame_size
+                u, v = x * (width - 1), y * (height - 1)
+                projection = projections[observation.source_id]
+                rows.extend((u * projection[2] - projection[0], v * projection[2] - projection[1]))
+                rays.append((projection, u, v))
+            if len(rays) < 2:
+                return False
+            try:
+                _, _, vt = np.linalg.svd(rows)
+                if abs(vt[-1, 3]) < 1e-8:
+                    return False
+                point = vt[-1, :3] / vt[-1, 3]
+                if not np.isfinite(point).all():
+                    return False
+                for projection, u, v in rays:
+                    projected = projection @ np.append(point, 1.)
+                    if projected[2] <= 1e-8 or math.hypot(projected[0] / projected[2] - u, projected[1] / projected[2] - v) > 20:
+                        return False
+                points[index] = [*point, .99]
+            except (ValueError, np.linalg.LinAlgError):
+                return False
+        combined = CameraObservation("combined", PoseResult(True, .99, [], points), (1, 1))
+        return self._is_t_pose(combined)
+
     def _geometry_landmarks(self, observation, np):
         """Return body-centred landmarks in the basis used by projection geometry."""
         pose = observation.pose
@@ -395,6 +472,8 @@ class MultiCameraPoseFusion:
         self._calibration_started_at = None
         self._last_valid_calibration_at = None
         self._calibration_valid_elapsed = 0.0
+        self._calibration_interrupted = False
+        self._last_calibration_captures = {}
 
     def _finalize_alignments(self, np) -> None:
         for source in self.source_ids:
@@ -422,25 +501,41 @@ class MultiCameraPoseFusion:
         if self.calibration_duration_seconds is not None:
             present = {observation.source_id for observation in observations}
             if present != set(self.source_ids):
+                self._calibration_interrupted = True
                 missing = len(self.source_ids) - len(present)
                 self._calibration_hint = f"Waiting for {missing} camera(s) to see a pose"
                 if self._last_valid_calibration_at is None or now - self._last_valid_calibration_at > 0.75:
                     self._clear_calibration_samples()
                 return
-            if not all(self._is_t_pose(observation) for observation in observations):
+            if not all(self._is_t_pose(observation) for observation in observations) and not self._is_multiview_t_pose(observations):
+                self._calibration_interrupted = True
                 self._calibration_hint = "Raise both arms into a T-pose and keep every limb visible"
                 if self._last_valid_calibration_at is None or now - self._last_valid_calibration_at > 0.75:
                     self._clear_calibration_samples()
+                return
+            # The engine retains recent results to pair cameras with different
+            # frame rates. Reusing a frame is useful for fusion, but must not
+            # fabricate additional independent calibration samples.
+            if any(
+                observation.captured_at is not None
+                and observation.captured_at <= self._last_calibration_captures.get(observation.source_id, float("-inf"))
+                for observation in observations
+            ):
                 return
             if self._last_valid_calibration_at is not None:
                 gap = max(0.0, now - self._last_valid_calibration_at)
                 if gap > 0.75:
                     self._clear_calibration_samples()
-                else:
+                elif not self._calibration_interrupted:
                     self._calibration_valid_elapsed += min(gap, 0.25)
+            self._calibration_interrupted = False
             if self._calibration_started_at is None:
                 self._calibration_started_at = now
             self._last_valid_calibration_at = now
+            self._last_calibration_captures = {
+                observation.source_id: observation.captured_at
+                for observation in observations if observation.captured_at is not None
+            }
             remaining = max(0.0, self.calibration_duration_seconds - self._calibration_valid_elapsed)
             self._calibration_hint = f"Hold the T-pose for {remaining:.1f} more seconds"
 
@@ -590,7 +685,7 @@ class MultiCameraPoseFusion:
             ))
         return tuple(poses)
 
-    def _triangulate(self, observations, cv2_module) -> PoseResult:
+    def _projection_geometry(self, observations, cv2_module):
         import numpy as np
 
         by_source = {item.source_id: item for item in observations}
@@ -607,6 +702,12 @@ class MultiCameraPoseFusion:
             matrix = self._camera_matrix(observation.frame_size, np, source)
             projections[source] = matrix @ np.column_stack((rotation, np.asarray(tvec).reshape(3)))
             camera_positions[source] = np.asarray(position, dtype=np.float64)
+        return projections, camera_positions
+
+    def _triangulate(self, observations, cv2_module) -> PoseResult:
+        import numpy as np
+        by_source = {item.source_id: item for item in observations}
+        projections, camera_positions = self._projection_geometry(observations, cv2_module)
 
         primary = observations[0].pose
         camera_basis_output = (
@@ -634,32 +735,10 @@ class MultiCameraPoseFusion:
             point = None
             confidence = 0.0
             if len(views) >= 2:
-                try:
-                    _u, _s, vt = np.linalg.svd(np.asarray(rows, dtype=np.float64))
-                    homogeneous = vt[-1]
-                    if abs(homogeneous[3]) > 1e-8:
-                        candidate = homogeneous[:3] / homogeneous[3]
-                        errors, positive_depth = [], True
-                        for source, u, v, _visibility in views:
-                            projected = projections[source] @ np.append(candidate, 1.0)
-                            positive_depth &= projected[2] > 0
-                            if abs(projected[2]) > 1e-8:
-                                errors.append(math.hypot(projected[0] / projected[2] - u, projected[1] / projected[2] - v))
-                        error = sum(errors) / len(errors) if errors else float("inf")
-                        directions = [candidate - camera_positions[item[0]] for item in views]
-                        geometry = 0.15
-                        for first in range(len(directions)):
-                            for second in range(first + 1, len(directions)):
-                                a, b = directions[first], directions[second]
-                                denominator = np.linalg.norm(a) * np.linalg.norm(b)
-                                if denominator > 1e-8:
-                                    cosine = float(np.clip(np.dot(a, b) / denominator, -1.0, 1.0))
-                                    geometry = max(geometry, min(1.0, math.sin(math.acos(cosine)) / math.sin(math.radians(20))))
-                        if positive_depth and math.isfinite(error) and error <= 40.0:
-                            point = candidate
-                            confidence = (sum(item[3] for item in views) / len(views)) * geometry * max(0.25, 1.0 - error / 50.0)
-                except (ValueError, np.linalg.LinAlgError):
-                    pass
+                from Lib.Triangulation import triangulate_consensus
+                solved = triangulate_consensus(views, projections, camera_positions)
+                if solved is not None:
+                    point, confidence, reprojection_error = solved
             raw_candidates.append((point, min(max(float(confidence), 0.0), 1.0)) if point is not None else None)
 
         # A low reprojection error does not by itself guarantee a physically
@@ -733,6 +812,7 @@ class MultiCameraPoseFusion:
             plausible_center = abs(center[0]) <= room_width / 2 + 0.75 and abs(center[2]) <= room_depth / 2 + 0.75
             if not plausible_center or not np.isfinite(expected).all():
                 transform = None
+        current_transform_valid = transform is not None
         if transform is None:
             transform = self._last_body_transform
         if transform is None:
@@ -749,6 +829,7 @@ class MultiCameraPoseFusion:
         fused_world, fused_visibilities = [], []
         now = self._clock()
         torso = {11, 12, 23, 24}
+        limb_parents = {13: 11, 14: 12, 15: 13, 16: 14, 25: 23, 26: 24, 27: 25, 28: 26}
         for index, expected_geometry in enumerate(expected_points):
             expected = output_basis @ expected_geometry
             candidate = raw_candidates[index]
@@ -762,7 +843,14 @@ class MultiCameraPoseFusion:
                     and self._room_floor - 0.35 <= point[1] <= self._room_floor + room_height + 0.5
                     and abs(point[2]) <= room_depth / 2 + 0.5
                 )
-                accepted = inside_room and float(np.linalg.norm(point - expected)) <= tolerance
+                credible_geometry = confidence >= .8
+                if index in limb_parents:
+                    parent = limb_parents[index]
+                    parent_candidate = raw_candidates[parent]
+                    parent_point = (output_basis @ parent_candidate[0]) if parent_candidate is not None else room_expected_points[parent]
+                    length = float(np.linalg.norm(point - parent_point))
+                    credible_geometry &= .05 <= length <= (.7 if index < 23 else .9)
+                accepted = inside_room and (float(np.linalg.norm(point - expected)) <= tolerance or credible_geometry)
             if accepted:
                 output = np.asarray(point, dtype=np.float64)
                 output_confidence = confidence
@@ -776,7 +864,25 @@ class MultiCameraPoseFusion:
                 )
                 if expected_inside_room:
                     output = expected
-                    output_confidence = min(0.74, max(0.0, visibility * 0.78))
+                    # Without a current multi-view body transform, the cached
+                    # translation does not establish where a moving person is.
+                    # Do not advertise that stale room position as a live tracker.
+                    limit = 0.74 if current_transform_valid else 0.29
+                    agreeing_views = 0
+                    visible_views = 0
+                    for source, projection in projections.items():
+                        image_point = by_source[source].pose.image_landmarks[index]
+                        if image_point[3] < .55:
+                            continue
+                        visible_views += 1
+                        width, height = by_source[source].frame_size
+                        projected = projection @ np.append(expected_geometry, 1.)
+                        if projected[2] > 1e-8 and math.hypot(projected[0] / projected[2] - image_point[0] * (width - 1),
+                                                            projected[1] / projected[2] - image_point[1] * (height - 1)) <= 20:
+                            agreeing_views += 1
+                    if agreeing_views < min(2, max(1, visible_views)):
+                        limit = min(limit, .29)
+                    output_confidence = min(limit, max(0.0, visibility * 0.78))
                 else:
                     previous = self._last_points.get(index)
                     age = now - self._last_point_times.get(index, float("-inf"))
@@ -799,12 +905,16 @@ class MultiCameraPoseFusion:
 
 
 def _landmark_values(landmark) -> list[float]:
-    return [
+    values = [
         float(landmark.x),
         float(landmark.y),
         float(landmark.z),
-        min(float(landmark.visibility), float(getattr(landmark, "presence", 1.0))),
+        float(landmark.visibility),
+        float(getattr(landmark, "presence", 1.0)),
     ]
+    if not all(math.isfinite(value) for value in values):
+        return [0.0, 0.0, 0.0, 0.0]
+    return [*values[:3], min(1.0, max(0.0, min(values[3:])))]
 
 
 def convert_mediapipe_landmarks(
@@ -816,6 +926,8 @@ def convert_mediapipe_landmarks(
         return PoseResult(False, 0.0, [], [])
     image = [_landmark_values(image_landmarks[index]) for index in MEDIAPIPE_TO_VRFBT]
     world_raw = [_landmark_values(world_landmarks[index]) for index in MEDIAPIPE_TO_VRFBT]
+    for image_point, world_point in zip(image, world_raw):
+        image_point[3] = world_point[3] = min(image_point[3], world_point[3])
     # Convert a front-facing camera to VRChat Unity space: +X user-right,
     # +Y up, +Z user-forward, with one unit per meter.
     world = [[-x, -y, -z, visibility] for x, y, z, visibility in world_raw]
@@ -828,11 +940,15 @@ class Pose:
 
     def __init__(self, quality: str = "full"):
         normalized = quality.strip().casefold()
-        if normalized not in MODEL_PATHS:
-            raise ValueError(f"Unknown pose model {quality!r}; choose lite, full, or heavy")
-        model_path = MODEL_PATHS[normalized]
+        if normalized not in {*MODEL_PATHS, 'dwpose'}:
+            raise ValueError(f"Unknown pose model {quality!r}; choose lite, full, heavy, or dwpose")
+        model_path = MODEL_PATHS['full' if normalized == 'dwpose' else normalized]
         if not model_path.is_file():
             raise FileNotFoundError(f"MediaPipe pose model is missing: {model_path}")
+        self._refiner = None
+        if normalized == 'dwpose':
+            from Lib.Refinement import DWPoseRefiner
+            self._refiner = DWPoseRefiner()
 
         # Suppress native informational logging without hiding errors.
         os.environ.setdefault("GLOG_minloglevel", "2")
@@ -863,13 +979,18 @@ class Pose:
         result = self._landmarker.detect_for_video(image, timestamp_ms)
         if not result.pose_landmarks or not result.pose_world_landmarks:
             return PoseResult(False, 0.0, [], [])
-        return convert_mediapipe_landmarks(result.pose_landmarks[0], result.pose_world_landmarks[0])
+        pose = convert_mediapipe_landmarks(result.pose_landmarks[0], result.pose_world_landmarks[0])
+        return self._refiner.refine(bgr_frame, pose) if self._refiner is not None else pose
 
     def close(self) -> None:
         landmarker = getattr(self, "_landmarker", None)
         if landmarker is not None:
             landmarker.close()
             self._landmarker = None
+        refiner = getattr(self, '_refiner', None)
+        if refiner is not None:
+            refiner.close()
+            self._refiner = None
 
     def __enter__(self):
         return self

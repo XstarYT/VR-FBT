@@ -7,6 +7,9 @@ from datetime import datetime, timedelta, timezone
 import asyncio
 import hmac
 import ipaddress
+import math
+import json
+import struct
 import os
 import secrets
 import shutil
@@ -18,12 +21,16 @@ import threading
 import time
 from pathlib import Path
 from typing import Callable
+from Lib.Synchronization import MediaTimeline
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WEB_PAGE = PROJECT_ROOT / "Content" / "Website" / "index.html"
 MAX_FRAME_BYTES = 16 * 1024 * 1024
 MAX_PHONE_CAMERAS = 3
+MAX_OFFLINE_PHONE_HISTORY = 32
+WEBRTC_OFFER_TIMEOUT = 10.0
+WEBRTC_FRAME_TIMEOUT = 15.0
 CERTIFICATE_DIR = Path(os.environ.get("LOCALAPPDATA", PROJECT_ROOT)) / "VR-FBT" / "certificates"
 OPENSSL_MARKER = ".generated-by-openssl"
 
@@ -278,6 +285,8 @@ class RemoteCameraRegistry:
 
     def __init__(self, on_change: Callable[[], None] | None = None):
         self._states: dict[str, _PhoneCameraState] = {}
+        self._offline_order: dict[str, None] = {}
+        self._retired_sequence = 0
         self._condition = threading.Condition()
         self._on_change = on_change or (lambda: None)
 
@@ -291,9 +300,10 @@ class RemoteCameraRegistry:
         name = self._clean(name, "Phone camera", 80)
         address = self._clean(address, "unknown", 80)
         with self._condition:
+            self._offline_order.pop(device_id, None)
             state = self._states.get(device_id)
             if state is None:
-                state = _PhoneCameraState(device_id, name, address)
+                state = _PhoneCameraState(device_id, name, address, sequence=self._retired_sequence)
                 self._states[device_id] = state
             else:
                 state.name, state.address, state.connected = name, address, True
@@ -309,10 +319,19 @@ class RemoteCameraRegistry:
             if state is not None:
                 state.connected = False
                 state.frame = None
+                self._offline_order.pop(device_id, None)
+                self._offline_order[device_id] = None
+                while len(self._offline_order) > MAX_OFFLINE_PHONE_HISTORY:
+                    oldest = next(iter(self._offline_order))
+                    self._offline_order.pop(oldest)
+                    retired = self._states.pop(oldest)
+                    # A capture may still hold a cursor for an evicted device.
+                    # Its first frame after reconnect must exceed that cursor.
+                    self._retired_sequence = max(self._retired_sequence, retired.sequence)
                 self._condition.notify_all()
         self._on_change()
 
-    def update_frame(self, device_id: str, frame: bytes) -> bool:
+    def update_frame(self, device_id: str, frame: bytes, *, captured_at=None) -> bool:
         if not frame or len(frame) > MAX_FRAME_BYTES:
             return False
         with self._condition:
@@ -321,11 +340,11 @@ class RemoteCameraRegistry:
                 return False
             state.frame = bytes(frame)
             state.sequence += 1
-            state.last_frame_at = time.monotonic()
+            state.last_frame_at = time.monotonic() if captured_at is None else captured_at
             self._condition.notify_all()
         return True
 
-    def update_decoded_frame(self, device_id: str, frame) -> bool:
+    def update_decoded_frame(self, device_id: str, frame, *, captured_at=None) -> bool:
         """Publish a decoded BGR frame received through WebRTC."""
         if frame is None or getattr(frame, "ndim", 0) != 3 or getattr(frame, "size", 0) == 0:
             return False
@@ -335,16 +354,18 @@ class RemoteCameraRegistry:
                 return False
             state.frame = frame.copy()
             state.sequence += 1
-            state.last_frame_at = time.monotonic()
+            state.last_frame_at = time.monotonic() if captured_at is None else captured_at
             self._condition.notify_all()
         return True
 
-    def wait_for_frame(self, device_id: str, after_sequence: int = 0, timeout: float = 3.0) -> tuple[int, object] | None:
+    def wait_for_frame(self, device_id: str, after_sequence: int = 0, timeout: float = 3.0, *, include_timestamp: bool = False):
         deadline = time.monotonic() + timeout
         with self._condition:
             while True:
                 state = self._states.get(device_id)
                 if state is not None and state.connected and state.frame is not None and state.sequence > after_sequence:
+                    if include_timestamp:
+                        return state.sequence, state.frame, state.last_frame_at
                     return state.sequence, state.frame
                 if state is not None and not state.connected:
                     return None
@@ -463,13 +484,17 @@ class RemoteCameraHub:
                 raise web.HTTPUnauthorized()
             device_id, name, owner = reserve_camera(request)
             try:
-                parameters = await request.json()
+                async with asyncio.timeout(WEBRTC_OFFER_TIMEOUT):
+                    parameters = await request.json()
                 sdp, description_type = parameters["sdp"], parameters["type"]
                 if description_type != "offer" or not isinstance(sdp, str) or len(sdp) > 100_000:
                     raise ValueError
             except (KeyError, TypeError, ValueError):
                 release_reservation(device_id, owner)
                 raise web.HTTPBadRequest(text="invalid WebRTC offer")
+            except TimeoutError:
+                release_reservation(device_id, owner)
+                raise web.HTTPRequestTimeout(text="WebRTC offer body timed out")
             except BaseException:
                 release_reservation(device_id, owner)
                 raise
@@ -486,16 +511,14 @@ class RemoteCameraHub:
             self._connection_owners[device_id] = owner
 
             async def close_peer():
-                task = self._peer_tasks.get(device_id)
-                if task and task is not asyncio.current_task():
-                    task.cancel()
-                if self._peer_tasks.get(device_id) is task:
-                    self._peer_tasks.pop(device_id, None)
                 owns_connection = (
                     self._connection_owners.get(device_id) is owner
                     and self._peers.get(device_id) is peer
                 )
                 if owns_connection:
+                    task = self._peer_tasks.pop(device_id, None)
+                    if task and task is not asyncio.current_task():
+                        task.cancel()
                     self._peers.pop(device_id, None)
                     self._connection_owners.pop(device_id, None)
                     self.registry.disconnect(device_id)
@@ -505,21 +528,27 @@ class RemoteCameraHub:
             async def receive_video(track):
                 if self._connection_owners.get(device_id) is not owner:
                     return
-                self.registry.connect(device_id, name, request.remote or "adb")
+                self.registry.connect(device_id, name, request.remote or "unknown")
+                timeline = MediaTimeline()
                 try:
                     while True:
-                        frame = await track.recv()
-                        self.registry.update_decoded_frame(device_id, frame.to_ndarray(format="bgr24"))
-                except (MediaStreamError, asyncio.CancelledError):
+                        frame = await asyncio.wait_for(track.recv(), timeout=WEBRTC_FRAME_TIMEOUT)
+                        if self._connection_owners.get(device_id) is not owner:
+                            return
+                        arrived_at = time.monotonic()
+                        media_time = float(frame.pts * frame.time_base) if frame.pts is not None and frame.time_base is not None else None
+                        captured_at = timeline.timestamp(media_time, arrived_at)
+                        if captured_at is not None:
+                            self.registry.update_decoded_frame(device_id, frame.to_ndarray(format="bgr24"), captured_at=captured_at)
+                except (MediaStreamError, asyncio.CancelledError, TimeoutError):
                     pass
                 finally:
-                    if self._connection_owners.get(device_id) is owner:
-                        self.registry.disconnect(device_id)
+                    await close_peer()
 
             @peer.on("track")
             def on_track(track):
                 if track.kind == "video":
-                    if self._connection_owners.get(device_id) is owner:
+                    if self._connection_owners.get(device_id) is owner and device_id not in self._peer_tasks:
                         self._peer_tasks[device_id] = asyncio.create_task(receive_video(track))
 
             @peer.on("connectionstatechange")
@@ -528,11 +557,14 @@ class RemoteCameraHub:
                     await close_peer()
 
             try:
-                await peer.setRemoteDescription(RTCSessionDescription(sdp=sdp, type=description_type))
-                answer = await peer.createAnswer()
-                await peer.setLocalDescription(answer)
+                async with asyncio.timeout(WEBRTC_OFFER_TIMEOUT):
+                    await peer.setRemoteDescription(RTCSessionDescription(sdp=sdp, type=description_type))
+                    if device_id not in self._peer_tasks:
+                        raise web.HTTPBadRequest(text="WebRTC offer must include video")
+                    answer = await peer.createAnswer()
+                    await peer.setLocalDescription(answer)
                 return web.json_response({"sdp": peer.localDescription.sdp, "type": peer.localDescription.type})
-            except Exception:
+            except BaseException:
                 await close_peer()
                 raise
 
@@ -541,7 +573,7 @@ class RemoteCameraHub:
                 raise web.HTTPUnauthorized()
             device_id, name, owner = reserve_camera(request)
             try:
-                ws = web.WebSocketResponse(heartbeat=20, max_msg_size=MAX_FRAME_BYTES, compress=False)
+                ws = web.WebSocketResponse(heartbeat=20, max_msg_size=MAX_FRAME_BYTES + 20, compress=False)
             except Exception:
                 release_reservation(device_id, owner)
                 raise
@@ -553,8 +585,32 @@ class RemoteCameraHub:
                 self.registry.connect(device_id, name, request.remote or "unknown")
                 async for message in ws:
                     if message.type is WSMsgType.BINARY:
-                        if not self.registry.update_frame(device_id, message.data):
+                        data = message.data
+                        captured_at = None
+                        if data.startswith(b"VFT1"):
+                            if len(data) <= 20:
+                                await ws.close(code=1007, message=b"invalid timing header")
+                                break
+                            captured_at, uncertainty = struct.unpack("!dd", data[4:20])
+                            arrived_at = time.monotonic()
+                            if not all(math.isfinite(value) for value in (captured_at, uncertainty)) or not 0 <= uncertainty <= 0.025:
+                                await ws.close(code=1007, message=b"invalid clock estimate")
+                                break
+                            if captured_at > arrived_at + uncertainty or arrived_at - captured_at > 0.250:
+                                continue  # stale or impossible capture time; never relabel as fresh
+                            data = data[20:]
+                        if not self.registry.update_frame(device_id, data, captured_at=captured_at):
                             await ws.close(code=1009, message=b"invalid frame")
+                    elif message.type is WSMsgType.TEXT:
+                        try:
+                            value = json.loads(message.data)
+                            client = value["client"]
+                            if value.get("type") != "clock" or not isinstance(client, (int, float)) or not math.isfinite(client):
+                                raise ValueError
+                            await ws.send_json({"type": "clock", "client": client, "server": time.monotonic()})
+                        except (ValueError, TypeError, KeyError):
+                            await ws.close(code=1007, message=b"invalid clock request")
+                            break
                     elif message.type is WSMsgType.ERROR:
                         break
             finally:
@@ -588,7 +644,7 @@ class RemoteCameraHub:
             await runner.cleanup()
 
     def _authorized(self, supplied: str) -> bool:
-        return bool(supplied) and hmac.compare_digest(supplied, self.token)
+        return bool(supplied) and supplied.isascii() and hmac.compare_digest(supplied, self.token)
 
 
 class RemoteCapture:
@@ -599,6 +655,7 @@ class RemoteCapture:
         self.timeout = max(0.01, float(timeout))
         self.sequence = 0
         self.closed = False
+        self.captured_at = None
 
     def isOpened(self) -> bool:
         return not self.closed and any(item.device_id == self.device_id and item.connected for item in self.registry.list_cameras())
@@ -606,10 +663,10 @@ class RemoteCapture:
     def read(self):
         import numpy as np
 
-        result = self.registry.wait_for_frame(self.device_id, self.sequence, self.timeout)
+        result = self.registry.wait_for_frame(self.device_id, self.sequence, self.timeout, include_timestamp=True)
         if result is None:
             return False, None
-        self.sequence, encoded = result
+        self.sequence, encoded, self.captured_at = result
         if isinstance(encoded, (bytes, bytearray, memoryview)):
             frame = self.cv2.imdecode(np.frombuffer(encoded, dtype=np.uint8), self.cv2.IMREAD_COLOR)
         else:

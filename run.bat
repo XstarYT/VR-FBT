@@ -2,7 +2,7 @@
 cd /d "%~dp0"
 
 if not exist ".venv\Scripts\pythonw.exe" (
-    echo VR-FBT environment is missing. Install dependencies first.
+    echo VR-FBT environment is missing. Run setup.bat first.
     pause
     exit /b 1
 )

@@ -35,7 +35,8 @@ class OscAndEngineTests(unittest.TestCase):
         }
         frame = VRChatFrame(trackers, (0, 1, 2), (3, 4, 5), 1.0, 0.9)
         server = FakeServer()
-        TrackingController._send_vrchat_frame(frame, server, OSCKit)
+        packets = TrackingController._send_vrchat_frame(frame, server, OSCKit)
+        self.assertEqual(packets, 17)
         self.assertEqual(len(server.messages), 17)
         self.assertEqual(server.messages[0][0], "/tracking/trackers/1/position")
         self.assertEqual(len(server.messages[0][1]), 3)
@@ -78,6 +79,12 @@ class OscAndEngineTests(unittest.TestCase):
         paths = {message[0] for message in server.messages}
         self.assertNotIn("/tracking/trackers/head/position", paths)
         self.assertNotIn("/tracking/trackers/head/rotation", paths)
+
+    def test_withheld_frame_reports_zero_packets(self):
+        frame = VRChatFrame({"1": TrackerPose((0, 1, 2), (1, 2, 3), 0.1)}, (0, 1, 2), (3, 4, 5), 1.0, 0.2)
+        server = FakeServer()
+        self.assertEqual(TrackingController._send_vrchat_frame(frame, server, OSCKit, align_head=True), 0)
+        self.assertEqual(server.messages, [])
 
 
 if __name__ == "__main__":

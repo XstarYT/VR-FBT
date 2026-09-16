@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "description": "Offline rendered-human acceptance experiment for VR-FBT",
+  "dependencies": {"three": "0.180.0", "playwright": "1.62.1"}
+}

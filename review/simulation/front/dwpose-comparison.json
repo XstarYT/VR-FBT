@@ -1,0 +1,661 @@
+{
+  "quality": "dwpose",
+  "model_sha256": "4eaa5eb7a98365221087693fcc286334cf0858e2eb6e15b506aa4a7ecdcec4ad",
+  "inference_ms": {
+    "mean": 63.9512,
+    "p50": 64.0384,
+    "p95": 75.6641,
+    "max": 94.8922
+  },
+  "fusion": [
+    {
+      "camera_count": 2,
+      "scenario": "normal",
+      "input": "rendered_detector",
+      "calibrated_at_s": 10.133333333333333,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.782132768361582,
+      "within_20cm_fraction": 0.7793079096045198,
+      "all_joint_error_m": {
+        "mean": 0.1159,
+        "p50": 0.0618,
+        "p95": 0.4686,
+        "max": 0.884
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0566,
+        "p50": 0.0522,
+        "p95": 0.1166,
+        "max": 0.2521
+      },
+      "live_time_error_m": {
+        "mean": 0.2057,
+        "p50": 0.1578,
+        "p95": 0.4909,
+        "max": 0.8028
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0532,
+          "p50": 0.0531,
+          "p95": 0.0927,
+          "max": 0.1267
+        },
+        "run": {
+          "mean": 0.058,
+          "p50": 0.0547,
+          "p95": 0.1033,
+          "max": 0.2521
+        },
+        "turn": {
+          "mean": 0.0579,
+          "p50": 0.0498,
+          "p95": 0.1312,
+          "max": 0.2521
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 2,
+      "scenario": "jitter",
+      "input": "rendered_detector",
+      "calibrated_at_s": 10.166666666666666,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.7831920903954802,
+      "within_20cm_fraction": 0.780367231638418,
+      "all_joint_error_m": {
+        "mean": 0.1155,
+        "p50": 0.0617,
+        "p95": 0.4686,
+        "max": 0.884
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0566,
+        "p50": 0.052,
+        "p95": 0.1166,
+        "max": 0.2521
+      },
+      "live_time_error_m": {
+        "mean": 0.2245,
+        "p50": 0.1783,
+        "p95": 0.526,
+        "max": 0.866
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0533,
+          "p50": 0.0531,
+          "p95": 0.0929,
+          "max": 0.1267
+        },
+        "run": {
+          "mean": 0.058,
+          "p50": 0.0547,
+          "p95": 0.1033,
+          "max": 0.2521
+        },
+        "turn": {
+          "mean": 0.0578,
+          "p50": 0.0498,
+          "p95": 0.1312,
+          "max": 0.2521
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 2,
+      "scenario": "dropout",
+      "input": "rendered_detector",
+      "calibrated_at_s": 10.133333333333333,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.5745056497175142,
+      "within_20cm_fraction": 0.5737994350282486,
+      "all_joint_error_m": {
+        "mean": 0.2063,
+        "p50": 0.0829,
+        "p95": 0.6614,
+        "max": 1.0178
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0561,
+        "p50": 0.0514,
+        "p95": 0.1193,
+        "max": 0.2521
+      },
+      "live_time_error_m": {
+        "mean": 0.2723,
+        "p50": 0.1891,
+        "p95": 0.7073,
+        "max": 1.1281
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0532,
+          "p50": 0.0531,
+          "p95": 0.0927,
+          "max": 0.1267
+        },
+        "run": null,
+        "turn": {
+          "mean": 0.0579,
+          "p50": 0.0498,
+          "p95": 0.1312,
+          "max": 0.2521
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 2,
+      "scenario": "late",
+      "input": "rendered_detector",
+      "calibrated_at_s": 10.133333333333333,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.0,
+      "within_20cm_fraction": 0.0,
+      "all_joint_error_m": {
+        "mean": 0.4875,
+        "p50": 0.4769,
+        "p95": 0.867,
+        "max": 1.3571
+      },
+      "eligible_joint_error_m": null,
+      "live_time_error_m": {
+        "mean": 0.4782,
+        "p50": 0.4656,
+        "p95": 0.8504,
+        "max": 1.2443
+      },
+      "phase_error_m": {
+        "walk": null,
+        "run": null,
+        "turn": null
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 2,
+      "scenario": "arrival_only",
+      "input": "rendered_detector",
+      "calibrated_at_s": 10.266666666666667,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.7295197740112994,
+      "within_20cm_fraction": 0.7111581920903954,
+      "all_joint_error_m": {
+        "mean": 0.1476,
+        "p50": 0.0925,
+        "p95": 0.4694,
+        "max": 0.9956
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0856,
+        "p50": 0.0801,
+        "p95": 0.1733,
+        "max": 0.3372
+      },
+      "live_time_error_m": {
+        "mean": 0.2293,
+        "p50": 0.1823,
+        "p95": 0.5488,
+        "max": 0.9873
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0702,
+          "p50": 0.0706,
+          "p95": 0.1135,
+          "max": 0.1747
+        },
+        "run": {
+          "mean": 0.1014,
+          "p50": 0.0919,
+          "p95": 0.2125,
+          "max": 0.2839
+        },
+        "turn": {
+          "mean": 0.0869,
+          "p50": 0.0817,
+          "p95": 0.1825,
+          "max": 0.3372
+        }
+      },
+      "max_selected_skew_ms": 3.333,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 3,
+      "scenario": "normal",
+      "input": "rendered_detector",
+      "calibrated_at_s": 10.133333333333333,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.8057909604519774,
+      "within_20cm_fraction": 0.8036723163841808,
+      "all_joint_error_m": {
+        "mean": 0.1103,
+        "p50": 0.0584,
+        "p95": 0.4776,
+        "max": 1.0272
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0544,
+        "p50": 0.0491,
+        "p95": 0.1111,
+        "max": 0.2521
+      },
+      "live_time_error_m": {
+        "mean": 0.2053,
+        "p50": 0.1515,
+        "p95": 0.5253,
+        "max": 0.8253
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0519,
+          "p50": 0.0519,
+          "p95": 0.0866,
+          "max": 0.1267
+        },
+        "run": {
+          "mean": 0.0582,
+          "p50": 0.0537,
+          "p95": 0.1028,
+          "max": 0.2521
+        },
+        "turn": {
+          "mean": 0.0535,
+          "p50": 0.0453,
+          "p95": 0.1236,
+          "max": 0.2521
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 3,
+      "scenario": "jitter",
+      "input": "rendered_detector",
+      "calibrated_at_s": 10.166666666666666,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.8057909604519774,
+      "within_20cm_fraction": 0.8036723163841808,
+      "all_joint_error_m": {
+        "mean": 0.1104,
+        "p50": 0.0584,
+        "p95": 0.4782,
+        "max": 1.0272
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0543,
+        "p50": 0.049,
+        "p95": 0.1107,
+        "max": 0.2521
+      },
+      "live_time_error_m": {
+        "mean": 0.2254,
+        "p50": 0.1752,
+        "p95": 0.5486,
+        "max": 0.8733
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0519,
+          "p50": 0.0519,
+          "p95": 0.0866,
+          "max": 0.1267
+        },
+        "run": {
+          "mean": 0.0582,
+          "p50": 0.0537,
+          "p95": 0.1028,
+          "max": 0.2521
+        },
+        "turn": {
+          "mean": 0.0534,
+          "p50": 0.045,
+          "p95": 0.1227,
+          "max": 0.2521
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 3,
+      "scenario": "dropout",
+      "input": "rendered_detector",
+      "calibrated_at_s": 10.133333333333333,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.7937853107344632,
+      "within_20cm_fraction": 0.7923728813559322,
+      "all_joint_error_m": {
+        "mean": 0.1145,
+        "p50": 0.061,
+        "p95": 0.4808,
+        "max": 1.0272
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0559,
+        "p50": 0.0506,
+        "p95": 0.1125,
+        "max": 0.6861
+      },
+      "live_time_error_m": {
+        "mean": 0.207,
+        "p50": 0.1539,
+        "p95": 0.5292,
+        "max": 0.8253
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0519,
+          "p50": 0.0519,
+          "p95": 0.0866,
+          "max": 0.1267
+        },
+        "run": {
+          "mean": 0.064,
+          "p50": 0.0617,
+          "p95": 0.1154,
+          "max": 0.6861
+        },
+        "turn": {
+          "mean": 0.0535,
+          "p50": 0.0453,
+          "p95": 0.1236,
+          "max": 0.2521
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 3,
+      "scenario": "late",
+      "input": "rendered_detector",
+      "calibrated_at_s": 10.133333333333333,
+      "calibration_hint": "",
+      "motion_frames": 236,
+      "detected_fraction": 1.0,
+      "eligible_joint_fraction": 0.7284604519774012,
+      "within_20cm_fraction": 0.7143361581920904,
+      "all_joint_error_m": {
+        "mean": 0.1545,
+        "p50": 0.0709,
+        "p95": 0.5541,
+        "max": 1.193
+      },
+      "eligible_joint_error_m": {
+        "mean": 0.0625,
+        "p50": 0.0543,
+        "p95": 0.1193,
+        "max": 0.6861
+      },
+      "live_time_error_m": {
+        "mean": 0.2324,
+        "p50": 0.171,
+        "p95": 0.5756,
+        "max": 1.1918
+      },
+      "phase_error_m": {
+        "walk": {
+          "mean": 0.0515,
+          "p50": 0.0492,
+          "p95": 0.0926,
+          "max": 0.1193
+        },
+        "run": {
+          "mean": 0.064,
+          "p50": 0.0617,
+          "p95": 0.1154,
+          "max": 0.6861
+        },
+        "turn": {
+          "mean": 0.0681,
+          "p50": 0.0542,
+          "p95": 0.1587,
+          "max": 0.5027
+        }
+      },
+      "max_selected_skew_ms": 0,
+      "acceptance_pass": false
+    },
+    {
+      "camera_count": 3,
+      "scenario": "arrival_only",
+      "input": "rendered_detector",
+      "calibrated_at_s": null,
+      "calibration_hint": "Waiting for 1 camera(s) to see a pose",
+      "motion_frames": 236,
+      "detected_fraction": 0.0,
+      "eligible_joint_fraction": 0.0,
+      "within_20cm_fraction": 0.0,
+      "all_joint_error_m": null,
+      "eligible_joint_error_m": null,
+      "live_time_error_m": null,
+      "phase_error_m": {},
+      "max_selected_skew_ms": 30.0,
+      "acceptance_pass": false
+    }
+  ],
+  "joints": {
+    "LeftArm": {
+      "image_error_px": {
+        "mean": 15.9384,
+        "p50": 14.9865,
+        "p95": 28.0441,
+        "max": 32.449
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.0782,
+        "p50": 0.0777,
+        "p95": 0.1127,
+        "max": 0.1288
+      }
+    },
+    "RightArm": {
+      "image_error_px": {
+        "mean": 16.0397,
+        "p50": 14.6136,
+        "p95": 27.2106,
+        "max": 40.754
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.073,
+        "p50": 0.0733,
+        "p95": 0.0882,
+        "max": 0.1093
+      }
+    },
+    "LeftForeArm": {
+      "image_error_px": {
+        "mean": 12.0181,
+        "p50": 10.9537,
+        "p95": 25.1008,
+        "max": 35.2037
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.0612,
+        "p50": 0.0562,
+        "p95": 0.1031,
+        "max": 0.1349
+      }
+    },
+    "RightForeArm": {
+      "image_error_px": {
+        "mean": 11.4155,
+        "p50": 8.8852,
+        "p95": 27.5229,
+        "max": 36.9597
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.0527,
+        "p50": 0.0489,
+        "p95": 0.0991,
+        "max": 0.129
+      }
+    },
+    "LeftHand": {
+      "image_error_px": {
+        "mean": 7.479,
+        "p50": 5.4419,
+        "p95": 19.684,
+        "max": 63.2464
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.0403,
+        "p50": 0.027,
+        "p95": 0.1149,
+        "max": 0.2459
+      }
+    },
+    "RightHand": {
+      "image_error_px": {
+        "mean": 6.3211,
+        "p50": 4.8586,
+        "p95": 11.0331,
+        "max": 79.5946
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.0372,
+        "p50": 0.026,
+        "p95": 0.0571,
+        "max": 0.4055
+      }
+    },
+    "LeftUpLeg": {
+      "image_error_px": {
+        "mean": 10.8967,
+        "p50": 10.8381,
+        "p95": 20.452,
+        "max": 25.9271
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.0765,
+        "p50": 0.0748,
+        "p95": 0.1264,
+        "max": 0.1448
+      }
+    },
+    "RightUpLeg": {
+      "image_error_px": {
+        "mean": 9.0216,
+        "p50": 8.2921,
+        "p95": 18.3051,
+        "max": 21.3357
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.0537,
+        "p50": 0.0533,
+        "p95": 0.0962,
+        "max": 0.1107
+      }
+    },
+    "LeftLeg": {
+      "image_error_px": {
+        "mean": 7.8793,
+        "p50": 6.0143,
+        "p95": 18.1549,
+        "max": 106.565
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.0451,
+        "p50": 0.0391,
+        "p95": 0.1107,
+        "max": 0.1926
+      }
+    },
+    "RightLeg": {
+      "image_error_px": {
+        "mean": 7.8943,
+        "p50": 6.3232,
+        "p95": 18.6631,
+        "max": 115.79
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.0424,
+        "p50": 0.0333,
+        "p95": 0.1412,
+        "max": 0.2333
+      }
+    },
+    "LeftFoot": {
+      "image_error_px": {
+        "mean": 7.3078,
+        "p50": 5.7064,
+        "p95": 18.4583,
+        "max": 166.6775
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.0337,
+        "p50": 0.0276,
+        "p95": 0.0689,
+        "max": 0.2826
+      }
+    },
+    "RightFoot": {
+      "image_error_px": {
+        "mean": 7.5675,
+        "p50": 6.5951,
+        "p95": 16.1489,
+        "max": 38.8122
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.0361,
+        "p50": 0.0342,
+        "p95": 0.0684,
+        "max": 0.1013
+      }
+    },
+    "LeftToeBase": {
+      "image_error_px": {
+        "mean": 11.9702,
+        "p50": 10.4152,
+        "p95": 21.6045,
+        "max": 196.6503
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.0716,
+        "p50": 0.0635,
+        "p95": 0.1063,
+        "max": 0.4763
+      }
+    },
+    "RightToeBase": {
+      "image_error_px": {
+        "mean": 12.6154,
+        "p50": 11.7083,
+        "p95": 19.915,
+        "max": 165.6431
+      },
+      "raw_triangulation_error_m": {
+        "mean": 0.0728,
+        "p50": 0.0655,
+        "p95": 0.1083,
+        "max": 0.2915
+      }
+    }
+  }
+}

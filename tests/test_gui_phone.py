@@ -8,9 +8,102 @@ from unittest.mock import patch
 from Lib.GUI import VRFBTApp
 from Lib.Config import CameraSetup, Profile
 from Lib.RemoteCam import LocalCamera, ensure_local_certificates
+from tests.gui_process_case import FreshProcessGuiTest
 
 
-class PhoneGuiTests(unittest.TestCase):
+class PhoneGuiTests(FreshProcessGuiTest):
+    def test_camera_health_table_uses_anonymous_rows_and_handles_missing_samples(self):
+        from Lib.Metrics import SessionMetrics
+        metrics = SessionMetrics(("phone:private-id", "local:0"))
+        self.app._show_health(metrics.snapshot())
+        rows = [self.app.health_table.item(item)["values"] for item in self.app.health_table.get_children()]
+        self.assertEqual([row[0] for row in rows], ["camera-1", "camera-2"])
+        self.assertEqual(rows[0][1], "waiting")
+        self.assertEqual(rows[0][3], "—")
+        metrics.fail("local:0")
+        self.app._show_health(metrics.snapshot())
+        rows = [self.app.health_table.item(item)["values"] for item in self.app.health_table.get_children()]
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[1][1], "failed")
+
+    def test_save_as_preserves_old_rig_and_selects_new_profile(self):
+        from Lib import Config
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.multiple(Config, PROFILES_DIR=root / "profiles", SETTINGS_PATH=root / "settings.json"):
+                settings, profile = self.app._configuration_from_form()
+                Config.save_configuration(settings, profile)
+                original = (Config.PROFILES_DIR / f"{profile.name}.toml").read_bytes()
+                self.app.fps.set("24")
+                with patch("Lib.GUI.simpledialog.askstring", return_value="Alternate rig"):
+                    self.app._save_as()
+                self.assertEqual(self.app.profile_name.get(), "Alternate rig")
+                self.assertEqual(self.app.loaded_settings.fps, 24)
+                self.assertEqual(self.app.loaded_profile.name, "Alternate rig")
+                self.assertEqual(Config.load_settings(Config.SETTINGS_PATH).default_profile, "Alternate rig")
+                self.assertEqual((Config.PROFILES_DIR / f"{profile.name}.toml").read_bytes(), original)
+
+    def test_save_updates_the_in_memory_saved_profile(self):
+        with patch("Lib.GUI.save_configuration") as save:
+            self.app.fps.set("45")
+            self.app.user_height.set("1.89")
+            self.assertTrue(self.app._save(quiet=True))
+        save.assert_called_once()
+        self.assertEqual(self.app.loaded_settings.fps, 45)
+        self.assertEqual(self.app.loaded_profile.user_height_m, 1.89)
+
+    def test_small_window_keeps_tracking_controls_visible_and_fields_reachable(self):
+        self.app.deiconify()
+
+        def descendants(widget):
+            for child in widget.winfo_children():
+                yield child
+                yield from descendants(child)
+
+        osc_port = next(widget for widget in descendants(self.app.setup_scroll.content)
+                        if widget.winfo_class() == "TEntry" and str(widget.cget("textvariable")) == str(self.app.osc_port))
+        for size in ("940x640", "1120x760"):
+            with self.subTest(size=size):
+                self.app.geometry(size)
+                # Native mapping requires event processing, not only geometry
+                # idle callbacks; checking 1x1 unmapped widgets is misleading.
+                for _ in range(3):
+                    self.app.update()
+                    time.sleep(0.02)
+                for button in (self.app.start_button, self.app.stop_button, self.app.align_button, self.app.save_as_button):
+                    self.assertTrue(button.winfo_ismapped())
+                    self.assertGreater(button.winfo_width(), 20)
+                    self.assertLessEqual(button.winfo_rooty() + button.winfo_height(), self.app.winfo_rooty() + self.app.winfo_height())
+                    self.assertGreaterEqual(button.winfo_rootx(), self.app.winfo_rootx())
+                    self.assertLessEqual(button.winfo_rootx() + button.winfo_width(), self.app.winfo_rootx() + self.app.winfo_width())
+                for field in (self.app.camera_combos[0], osc_port):
+                    field.event_generate("<FocusIn>")
+                    self.app.update()
+                    canvas = self.app.setup_scroll.canvas
+                    self.assertGreaterEqual(field.winfo_rooty(), canvas.winfo_rooty())
+                    self.assertLessEqual(field.winfo_rooty() + field.winfo_height(), canvas.winfo_rooty() + canvas.winfo_height())
+                    self.assertGreaterEqual(field.winfo_rootx(), canvas.winfo_rootx())
+                    self.assertLessEqual(field.winfo_rootx() + field.winfo_width(), canvas.winfo_rootx() + canvas.winfo_width())
+
+    def test_support_export_cancel_does_not_start_background_work(self):
+        with patch("Lib.GUI.filedialog.asksaveasfilename", return_value=""):
+            self.app._export_support()
+        self.assertFalse(hasattr(self.app, "_export_thread"))
+
+    def test_support_export_uses_visible_settings_and_reports_completion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            destination = str(Path(directory) / "support.zip")
+            self.app.fps.set("24")
+            with patch("Lib.GUI.filedialog.asksaveasfilename", return_value=destination), patch("Lib.Support.export_support_bundle") as export, patch("Lib.GUI.messagebox.showinfo") as notice:
+                self.app._export_support()
+                self.app._export_thread.join(3)
+                self.app._drain_events()
+                export.assert_called_once()
+                self.assertEqual(export.call_args.args[1].fps, 24)
+                self.assertEqual(export.call_args.args[0], destination)
+                self.assertEqual(str(self.app.export_button["state"]), "normal")
+                notice.assert_called_once()
+
     def setUp(self):
         self.scan = patch.object(VRFBTApp, '_refresh_cameras')
         self.scan.start()
@@ -116,6 +209,28 @@ class PhoneGuiTests(unittest.TestCase):
         self.assertEqual(len(dialogs), 1)
         self.assertEqual(dialogs[0].title(), 'Camera and room layout')
         dialogs[0].destroy()
+
+    def test_lens_import_is_applied_only_when_layout_is_applied(self):
+        import json
+        def widgets(parent):
+            for child in parent.winfo_children():
+                yield child
+                yield from widgets(child)
+        intrinsics=(960.,720.,820.,825.,475.,354.)
+        distortion=(-.18,.04,.001,-.002,0.)
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'lens.json'
+            path.write_text(json.dumps({'schema':'vr-fbt-lens-v1','intrinsics':intrinsics,'distortion':distortion}))
+            original=dict(self.app.camera_setup_values)
+            self.app._show_camera_setup()
+            dialog=next(child for child in self.app.winfo_children() if child.winfo_class()=='Toplevel')
+            with patch('Lib.GUI.filedialog.askopenfilename',return_value=str(path)):
+                next(w for w in widgets(dialog) if w.winfo_class()=='TButton' and w.cget('text')=='Import lens…').invoke()
+            self.assertEqual(self.app.camera_setup_values,original)
+            next(w for w in widgets(dialog) if w.winfo_class()=='TButton' and w.cget('text')=='Apply layout').invoke()
+            _,profile=self.app._configuration_from_form()
+            self.assertEqual(profile.camera_setups[0].lens_intrinsics,intrinsics)
+            self.assertEqual(profile.camera_setups[0].lens_distortion,distortion)
 
     def test_vrchat_height_is_read_from_form(self):
         self.app.user_height.set('1.83')

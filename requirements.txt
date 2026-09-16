@@ -1,3 +1,4 @@
+-c requirements-lock.txt
 opencv-contrib-python==5.0.0.93
 scipy>=1.14,<2
 mediapipe==1.0.1
