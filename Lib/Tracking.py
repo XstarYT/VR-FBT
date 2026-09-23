@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 import os
 from pathlib import Path
@@ -68,6 +68,7 @@ class FusionResult:
     calibration_hint: str = ""
     room_floor: float | None = None
     safety_paused: bool = False
+    calibration_diagnostics: dict[str, str] = field(default_factory=dict)
 
 
 class MultiCameraPoseFusion:
@@ -150,6 +151,7 @@ class MultiCameraPoseFusion:
         self._last_valid_calibration_at = None
         self._calibration_valid_elapsed = 0.0
         self._calibration_hint = "Stand in a T-pose where every camera sees your full body"
+        self._calibration_diagnostics: dict[str, str] = {}
         self._calibration_interrupted = False
         self._last_calibration_captures = {}
         from Lib.GeometryHealth import GeometryHealth
@@ -186,7 +188,8 @@ class MultiCameraPoseFusion:
         if not self.calibrated:
             # Preserve the proven single-view path while neutral-pose camera
             # calibration gathers enough stable samples.
-            return FusionResult(usable[0].pose, camera_poses, False, self.calibration_progress, 1, self._calibration_hint, self._room_floor)
+            return FusionResult(usable[0].pose, camera_poses, False, self.calibration_progress, 1, self._calibration_hint, self._room_floor,
+                                calibration_diagnostics=dict(self._calibration_diagnostics))
 
         projections, positions = self._projection_geometry(usable, cv2_module)
         usable, warning, paused = self._geometry_health.filter(usable, projections, positions, self._clock())
@@ -509,7 +512,9 @@ class MultiCameraPoseFusion:
                 return
             if not all(self._is_t_pose(observation) for observation in observations) and not self._is_multiview_t_pose(observations):
                 self._calibration_interrupted = True
+                failed = [item.source_id for item in observations if not self._is_t_pose(item)]
                 self._calibration_hint = "Raise both arms into a T-pose and keep every limb visible"
+                self._calibration_diagnostics = {source: "T-pose not visible" for source in failed}
                 if self._last_valid_calibration_at is None or now - self._last_valid_calibration_at > 0.75:
                     self._clear_calibration_samples()
                 return
@@ -546,7 +551,14 @@ class MultiCameraPoseFusion:
         solved_this_frame: dict[str, tuple[object, object, float] | None] = {}
         alignments_this_frame: dict[str, tuple[object, float, object]] = {}
         for observation in observations:
+            correspondences, _image = self._valid_correspondences(reference_world, observation, np)
             solved = None if self.manual_camera_setup else self._solve_camera(reference_world, observation, cv2_module)
+            previous_errors = self._pose_samples.get(observation.source_id, ())
+            last_error = f", last accepted reprojection {previous_errors[-1][2]:.1f} px" if previous_errors else ""
+            self._calibration_diagnostics[observation.source_id] = (
+                f"{len(correspondences)} visible joints{last_error}" if solved is None else
+                f"{len(correspondences)} visible joints, reprojection {solved[2]:.1f} px"
+            )
             if not self.manual_camera_setup and solved is None:
                 continue
             solved_this_frame[observation.source_id] = solved
@@ -558,7 +570,8 @@ class MultiCameraPoseFusion:
             if alignment is not None:
                 alignments_this_frame[observation.source_id] = alignment
         if any(source not in solved_this_frame for source in self.source_ids):
-            self._calibration_hint = "Could not localize every camera; check framing and FOV"
+            details = "; ".join(f"{source}: {self._calibration_diagnostics.get(source, 'no pose')}" for source in self.source_ids)
+            self._calibration_hint = f"Could not localize every camera; check framing and FOV ({details})"
             return
         sample_limit = max(
             self.calibration_frames,
@@ -612,9 +625,25 @@ class MultiCameraPoseFusion:
                 position_std = float(np.sqrt(np.mean(np.sum((camera_positions - mean_position) ** 2, axis=1))))
                 self._extrinsics[source] = (rvec, tvec, error)
                 self._calibration_stats[source] = (len(robust_samples), position_std)
+            from Lib.CalibrationQuality import layout_warning
+            positions = []
+            for source in self.source_ids:
+                rvec, tvec, _error = self._extrinsics[source]
+                rotation, _ = cv2_module.Rodrigues(np.asarray(rvec, dtype=np.float64))
+                positions.append(-(rotation.T @ np.asarray(tvec, dtype=np.float64).reshape(3)))
+            subject_center = np.median(np.asarray(reference_world, dtype=np.float64)[[11, 12, 23, 24], :3], axis=0)
+            warning = layout_warning(positions, subject_center)
+            if warning:
+                self._clear_calibration_samples()
+                self._calibration_hint = warning
+                return
         self._finalize_alignments(np)
         self._session_calibrated = True
-        self._calibration_hint = "T-pose calibration complete"
+        high_error = [source for source, (_rvec, _tvec, error) in self._extrinsics.items() if error > 8.0]
+        self._calibration_hint = (
+            "Import lens calibration for " + ", ".join(high_error) + " (checkerboard; see CAMERA_CALIBRATION.md)"
+            if high_error else "T-pose calibration complete"
+        )
 
     @staticmethod
     def _manual_camera_geometry(setup, np):

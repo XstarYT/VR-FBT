@@ -1,0 +1,319 @@
+# VR-FBT — precise change list (phone-first, unknown camera stats)
+
+This file records required product and code changes identified from repository review,
+READINESS.md / AUDIT.md / IMPROVEMENT_PROMPT.md, and the 1–2 external phone camera
+use case (unknown lens intrinsics, unknown subject distance, user must discover layout
+and heights). Each item names files, symbols, and the exact behavior to implement or fix.
+
+Evidence baseline (this machine): `scripts/verify.py` passes (167 pytest tests). Rendered-human
+acceptance and physical VRChat trials are still open (see review/simulation/REPORT.md).
+
+---
+
+## P0 — Default configuration misleads phone-only users
+
+### P0.1 Ship a phone-friendly default profile
+
+**File:** `Content/Profiles/Default.toml`
+
+**Current state:**
+- `manual-setup = true` with a fixed corner position `[-2.0, 1.4, -2.0]` and rotation aimed into a 4×2.7×4 m room.
+- New users with unknown room geometry inherit fixed virtual-room anchoring without measuring corners.
+
+**Required change:**
+- Set `manual-setup = false` for the stock `Default` profile (or add a separate profile e.g. `Phone-Auto.toml` and set `Content/settings.json` `default_profile` to it).
+- Ensure `[[camera.setup]]` entries still exist per selected source (for FOV, rotation, latency, lens import) but do not imply measured room corners when `manual-setup` is false.
+- Document in README that corner coordinates in Default are placeholders only when users opt into fixed-room mode.
+
+**File:** `Content/settings.json` — if a new profile name is introduced, update `default_profile` consistently.
+
+**Tests to update/add:**
+- `tests/test_profile_saving.py` / `tests/test_config.py`: assert default or documented phone profile has `manual_camera_setup is False` unless user explicitly enables layout anchoring.
+
+---
+
+### P0.2 Auto-select layout mode when adding phone sources
+
+**File:** `Lib/GUI.py`
+
+**Current state:**
+- `self.manual_camera_setup` defaults to `False` on fresh GUI (`tk.BooleanVar(value=False)` ~line 105) but loading `Default.toml` forces `True`.
+- Camera layout dialog (`_show_camera_setup`, ~508+) does not recommend automatic vs fixed-room based on source types.
+
+**Required change:**
+- When **all** selected `camera_sources` start with `phone:` and user has not saved explicit custom coordinates, default the layout dialog checkbox **“Anchor cameras at fixed positions in the virtual room”** to **unchecked** and show a one-line explanation: automatic T-pose extrinsics for 2+ phones; fixed-room only if room size and mount heights were measured.
+- When user picks a **corner** preset in the combobox and applies, keep existing behavior: `self.manual_camera_setup.set(manual.get() or used_corner)` (~615).
+- On **Save** from main window, if `len(sources) == 1` and all are phones and manual setup is false, do not require corner positions to match physical reality (validation already allows finite values; no change needed in `Lib/Config.py` validate except optional warning).
+
+---
+
+### P0.3 Block Start when saved phones are offline without explicit override
+
+**File:** `Lib/GUI.py` (start tracking handler), `Lib/Engine.py` (`_run`, source open ~228–243)
+
+**Current state:**
+- Profile can reference `phone:<uuid>` not present in hub registry; failure happens at runtime with `Could not open phone camera …`.
+
+**Required change:**
+- Before starting tracking, call remote hub registry (same source list as camera dropdown) and if any selected `phone:*` ID is missing, show a modal: list missing IDs, offer **Cancel** or **Start with available cameras only** (only if at least one source is openable).
+- Do not silently fall back to a previous primary (F06 was fixed in tests; ensure GUI path matches `tests/test_review_regressions.py` / F06 behavior).
+
+**Tests:** extend `tests/test_gui_phone.py` or add case for offline phone ID at Start.
+
+---
+
+## P0 — Unknown phone lens / FOV (60° prior is hard-coded)
+
+### P0.4 Surface FOV assumption in UI and tie to frame size
+
+**Files:**
+- `Lib/Tracking.py` — `MultiCameraPoseFusion._camera_matrix()` uses `camera_setups[source_id].horizontal_fov` or `self.horizontal_fov_degrees` (default 60).
+- `Lib/Config.py` — `CameraSetup.horizontal_fov` default `60.0`; validation 25–120° (~405).
+- `Lib/Engine.py` — logs WARN once for multi-camera estimated lenses (~212–214); no GUI field prominence.
+
+**Required change:**
+- In **Camera layout…** per camera, label horizontal FOV as **“Estimated (phones: try 55–70° if feet/knees drift at frame edges)”** and show **native frame width×height** from last received frame (query `RemoteCapture` / metrics) next to FOV so users know intrinsics math uses pre-rotation dimensions (README line 112).
+- After first frame from each phone, if resolution is known, optionally display derived focal length px for transparency (read-only): `fx = (width/2) / tan(hfov/2)` matching `vrfbt_calib/camera.py` convention.
+
+**Optional algorithm (new module or `Lib/Lens.py`):**
+- **FOV helper:** given a standing calibration frame, shoulder pixel span and MediaPipe shoulder world width prior (~0.4 m in `vrfbt_calib/calibrator.py` `d_real_shoulder_m`), estimate horizontal FOV; clamp to [25, 120]; write into `CameraSetup.horizontal_fov` only after user confirms in dialog.
+
+**Tests:** unit test for FOV-from-shoulder formula with synthetic landmarks; regression that `_camera_matrix` swaps width/height when `image_rotation in {90, 270}` (already partially covered in `tests/test_lens_geometry.py` — extend if missing).
+
+---
+
+### P0.5 First-run lens calibration path for phones
+
+**Files:** `CAMERA_CALIBRATION.md`, `scripts/calibrate_lens.py`, `Lib/GUI.py` (Import lens…)
+
+**Current state:** workflow exists but is disconnected from phone onboarding; users do not know when to run it.
+
+**Required change:**
+- After multi-camera T-pose completes with high reprojection error (expose error from `_solve_camera` / calibration stats in `FusionResult` or metrics), set `calibration_hint` to actionable text: **“Import lens calibration for camera X (checkerboard)”** with link anchor to CAMERA_CALIBRATION.md section.
+- Store per-source mean PnP reprojection from `_calibration_stats` / `_extrinsics` third component (~502 in `_localize_single_camera` pattern) in session metrics; show in Activity tab.
+
+---
+
+## P0 — Two-phone geometry without known distances
+
+### P0.6 Clarify automatic extrinsic calibration vs manual room
+
+**File:** `Lib/Tracking.py` — `MultiCameraPoseFusion`
+
+**Current behavior (keep, but document in UI):**
+- `len(source_ids) == 1`: `calibrated` property always `True` (~119–120); no 10 s T-pose.
+- `len(source_ids) > 1`: `calibration_duration_seconds=10.0` set in `Lib/Engine.py` ~223; `_observe_calibration` (~493+) accumulates valid time only when all sources present, T-pose valid, gaps ≤0.75 s reset; `manual_camera_setup=False` uses `_solve_camera` per view (~549).
+- `manual_camera_setup=True`: geometry from `_manual_camera_geometry`; T-pose timer still runs for session lock; **incorrect manual positions are not corrected by Recalibrate** (README 100–101).
+
+**Required change (UX, not math):**
+- In setup panel (`Lib/GUI.py` ~180), replace single static sentence with two modes:
+  - **1 phone:** “Stand facing camera; 20-frame body lock after TRACKING.”
+  - **2 phones, automatic:** “10 s T-pose visible on both; app estimates camera relation; room corners optional.”
+  - **2 phones, fixed room:** “Measure room W×H×D and each mount height (m); wrong layout breaks triangulation.”
+
+**Engine:** if `len(source_ids) > 1` and `profile.manual_camera_setup` and any setup still at `profile_camera_setups` synthetic defaults (~435–442 in `Lib/Config.py`) without user Apply, log WARN: **“Camera positions are factory defaults; measure or switch to automatic mode.”**
+
+---
+
+### P0.7 Placement guardrails (reject weak two-phone layouts)
+
+**File:** `Lib/Tracking.py` or new `Lib/CalibrationQuality.py` called from `_observe_calibration` / post-calibration
+
+**Required change:**
+- After extrinsics estimated (automatic mode), compute approximate angle between camera forward vectors in room space; if **< 30°** (phones nearly co-linear), set `calibration_hint = "Phones see the same angle; move one phone ~90° to the side"` and do not set `_session_calibrated = True`.
+- If triangulation baseline (distance between camera centers) < 0.5 m in normalized solve, same failure mode.
+
+**Tests:** synthetic two-camera fixtures in `tests/test_tracking.py` with parallel vs orthogonal setups.
+
+---
+
+## P0 — Tracking accuracy (product acceptance)
+
+### P0.8 Simulation acceptance gap
+
+**Reference:** `READINESS.md` (80% vs 90% joints within 20 cm), `review/simulation/REPORT.md`, `review/simulation/HARDENING.md`
+
+**Required change (measure before rewrite):**
+- Add CI or manual gate script target in `scripts/verify.py` (optional flag `--acceptance`) running `scripts/simulation/evaluate.py` (or documented command in REPORT.md) and fail if confident-joint coverage < 90% on the standard fixture **or** document explicit waiver in READINESS.
+- Until pass: GUI startup banner (non-blocking): **“Experimental accuracy; prefer Stable hip+feet trackers.”**
+
+---
+
+## P1 — Foolproof onboarding and recovery (phones)
+
+### P1.1 First-run wizard (new)
+
+**Files:** new `Lib/Wizard.py` or wizard frames in `Lib/GUI.py`; entry from `Main.py` if `Content/settings.json` flag `first_run_completed` is false.
+
+**Steps (exact):**
+1. Run diagnostics (`Lib/Config.run_diagnostics`) — block Continue on FAIL.
+2. VRChat OSC: host/port, **Send test pulse** (`Lib/OSCKit.py` / existing GUI test if any).
+3. Phone: open hub, show QR, wait until ≥1 device in registry (`Lib/RemoteCam.py`).
+4. Camera pick: dropdown with live status (reuse Activity metrics).
+5. Height entry with validation 1.0–2.5 m (`Lib/Config.py` ~419).
+6. Tracker set default **stable** (`Profile.vrchat_tracker_set`).
+7. Summary screen; set `first_run_completed` in settings.
+
+**Do not** auto-enable `manual-setup` for phone-only rigs in wizard completion profile.
+
+---
+
+### P1.2 Live pre-tracking preview in main window
+
+**File:** `Lib/GUI.py`, `Lib/Engine.py` or lightweight preview thread
+
+**Current state:** preview only in separate OpenCV debug windows when tracking runs (`show_output`).
+
+**Required change:**
+- **Preview cameras** button: mosaic of selected sources (reuse `Lib/DebugView.render_camera_mosaic` logic) without starting pose workers, or start capture-only on phones until Stop preview.
+- Overlay icons: full-body visible / pose detected (optional MediaPipe lite call — performance tradeoff; minimum: frame received + resolution).
+
+---
+
+### P1.3 Per-source reconnect
+
+**Files:** `Lib/GUI.py`, `Lib/RemoteCam.py`
+
+**Required change:**
+- Activity row per phone: **Copy link**, **Disconnect**, **Reconnect** (invalidate old WebRTC peer for that device ID, keep profile ID stable).
+- On reconnect, call `fusion.reset_calibration()` if that source was in active tracking set (expose via Engine callback).
+
+---
+
+### P1.4 Certificate / getUserMedia failure detection
+
+**Files:** `Content/Website/index.html`, `Lib/RemoteCam.py`
+
+**Current state:** phone page shows generic notices; desktop cannot distinguish cert-blocked camera from user cancel.
+
+**Required change:**
+- Phone page: on `getUserMedia` rejection, send structured error code over WSS (e.g. `camera_error: NotAllowedError|NotFoundError|SecurityError`).
+- Desktop hub logs and GUI show: **“Browser blocked camera (trust certificate or use another browser)”** for `SecurityError` / insecure context.
+
+**Tests:** extend `tests/phone_page.test.cjs` with mocked SecurityError path.
+
+---
+
+### P1.5 Calibration quality score on T-pose failure
+
+**File:** `Lib/Tracking.py` — `_observe_calibration`, hints ~498–561
+
+**Required change:**
+- When hint is `"Could not localize every camera; check framing and FOV"`, append per-camera: inlier count from `_solve_camera`, mean reprojection error, and whether `_is_t_pose` failed for that source alone.
+- Expose in `FusionResult` new field e.g. `calibration_diagnostics: dict[str, str]` consumed by `Lib/Engine.py` debug_status (~394).
+
+---
+
+## P1 — VRChat body calibration clarity
+
+### P1.6 Separate multi-cam T-pose from VRChat 20-frame lock
+
+**Files:** `Lib/Engine.py` (~270, ~417), `Lib/VRChat.py` (`VRChatPoseSolver`, `calibration_frames=20`)
+
+**Required change:**
+- Debug overlay strings must distinguish **“T-POSE CALIBRATION (cameras)”** vs **“CALIBRATING (VRChat scale/forward)”** — partially done; ensure GUI log uses same vocabulary.
+- If multi-cam T-pose not complete, **do not send OSC** (verify gating in Engine loop — assert in test).
+
+---
+
+## P1 — Timing (two phones)
+
+### P1.7 Delay (ms) setup assistant
+
+**File:** `Lib/GUI.py` camera layout help text (~565)
+
+**Required change:**
+- Add doc button **“Measure delay”** opening a short checklist (film clap/flash, adjust 0–200 ms per camera, retest quick motion).
+- Optional: log suggested delay from cross-correlation of motion magnitude between two phones (future); until then, do not auto-write latency.
+
+**File:** `Lib/Engine.py` — already applies `latency_offsets` (~216–217, ~252); no math change unless auto-estimation added.
+
+---
+
+## P2 — Code health and duplicate paths
+
+### P2.1 Unify or wire standalone calibration package
+
+**Files:** `vrfbt_calib/calibrator.py` (`TposeMultiCamCalibrator`), `Lib/Tracking.py` (`MultiCameraPoseFusion`)
+
+**Current state:** `review/BUG_REVIEW.md` notes desktop engine uses `Lib.Tracking.MultiCameraPoseFusion`; `vrfbt_calib` tests do not validate desktop path.
+
+**Required change (pick one):**
+- **A)** Refactor `_observe_calibration` extrinsic solve to call `TposeMultiCamCalibrator` with shared FOV priors and body widths; or
+- **B)** Delete or mark `vrfbt_calib` experimental-only in README and stop duplicating logic.
+
+Until then, any change to T-pose calibration must be applied in **both** places or explicitly documented as Lib-only.
+
+---
+
+### P2.2 Split large modules
+
+**Files:** `Lib/Tracking.py` (~925 lines), `Lib/GUI.py` (~681), `Lib/RemoteCam.py` (~598)
+
+**Required change:** extract without behavior change:
+- `Lib/Tracking/SingleCamera.py`, `MultiCameraCalibration.py`, `TriangulationFusion.py`
+- `Lib/GUI/SetupPanel.py`, `CameraLayoutDialog.py`
+- Package layout per `IMPROVEMENT_PROMPT.md` (`vr_fbt` installable)
+
+---
+
+### P2.3 Remove nested legacy tree
+
+**Directory:** `VR-FBT-main/`
+
+**Required change:** after one release cycle, remove duplicate `Main.py` redirect folder per AUDIT P0; keep compatibility batch only if still referenced in tests (`review/bug_reproductions.py` F09).
+
+---
+
+## P2 — Packaging and distribution
+
+### P2.4 Per-user mutable data
+
+**Current state:** profiles under `Content/Profiles/`, logs under `%LOCALAPPDATA%\VR-FBT\logs`.
+
+**Required change:**
+- Installer build: copy defaults to `%LOCALAPPDATA%\VR-FBT\Profiles` on first run; migrate existing `Content/Profiles` with tested migration in `Lib/Config.py`.
+- Never require write access beside Program Files for installed builds.
+
+---
+
+## P2 — Performance defaults for 2 phones
+
+### P2.5 Adaptive pose quality
+
+**File:** `Lib/Engine.py`, `Lib/Workers.py` (`PoseWorker`)
+
+**Required change:**
+- When `len(source_ids) >= 2` and CPU inference p95 from `Lib/Metrics.py` exceeds `(1000/settings.fps)*0.8` ms for 10 s, log recommendation to switch to **lite** or reduce phone FPS (link to phone page FPS select in `Content/Website/index.html` ~49).
+
+---
+
+## Documentation updates (same PR series as code)
+
+| File | Change |
+|------|--------|
+| `README.md` | Add **“Recommended: 1–2 phones, automatic geometry”** section: turn off fixed-room unless measured; front+side placement; 60° FOV tuning; link to `to-fix` implementation status. |
+| `READINESS.md` | Mark items done when P0.x merged; keep physical acceptance checklist. |
+| `AUDIT.md` | Close P1 items only with test evidence. |
+
+---
+
+## Verification commands (after each P0/P1 item)
+
+```powershell
+.venv\Scripts\python.exe scripts\verify.py
+.venv\Scripts\python.exe Main.py --check
+```
+
+Add targeted tests for every new gate (offline phone Start block, parallel-camera rejection, FOV helper, wizard save profile flags).
+
+Physical acceptance (not automatable here): READINESS.md § Physical acceptance sequence with 1 then 2 phones, Stable trackers, measured height, VRChat OSC enabled.
+
+---
+
+## Out of scope (do not implement without product decision)
+
+- Cloud relay, STUN/TURN, ADB, public tunnel (explicitly removed per AUDIT).
+- Default **full** 8-tracker mode for unknown phone accuracy.
+- GPU MediaPipe / DWPose as default on dual-phone CPU-bound PCs.
+- Claiming measurement-grade triangulation without checkerboard lens + measured room layout.

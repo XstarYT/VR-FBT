@@ -63,7 +63,7 @@
   const link = new URLSearchParams(location.hash.slice(1));
   const token = link.get('token') || new URLSearchParams(location.search).get('token') || '';
   const forceWebSocket = link.get('transport') === 'websocket';
-  let clientId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+  let clientId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   try {
     clientId = localStorage.getItem('vrfbt-device-id') || clientId;
     localStorage.setItem('vrfbt-device-id', clientId);
@@ -83,6 +83,13 @@
   }
   function state(label, live = false) { $('status').textContent = label; $('status').className = live ? 'pill live' : 'pill'; }
   function setRunning(running) { $('start').disabled = running; $('stop').disabled = !running; $('camera').disabled = running; $('empty').hidden = running; }
+  function reportCameraError(code) {
+    if (!token || typeof fetch !== 'function') return;
+    fetch(`/api/camera-error?token=${encodeURIComponent(token)}`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({device_id: clientId, code}),
+    }).catch(() => {});
+  }
   function clearDirectDeadline() { if (directDeadline) clearTimeout(directDeadline); directDeadline = null; }
 
   async function refreshCameras() {
@@ -101,6 +108,7 @@
     notice('');
     if (!token) return notice('This URL has no session token. Copy the complete URL from the VR-FBT app.', true);
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      reportCameraError('SecurityError');
       return notice('Open the HTTPS phone link shown by Connect phones in the desktop app.', true);
     }
     const attempt = ++generation;
@@ -135,7 +143,10 @@
         }
       }
     } catch (error) {
-      if (attempt === generation) { stop(); notice(`${error.name || 'Camera error'}: ${error.message || error}`, true); }
+      if (attempt === generation) {
+        if (['NotAllowedError', 'NotFoundError', 'SecurityError', 'NotReadableError'].includes(error.name)) reportCameraError(error.name);
+        stop(); notice(`${error.name || 'Camera error'}: ${error.message || error}`, true);
+      }
     }
   }
 

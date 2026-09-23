@@ -4,18 +4,21 @@ port = 9000
 
 [camera]
 cam-index = [0]
-source = "phone:b0a304df-d581-4b44-a8a9-7f0fccd511d2"
-sources = ["phone:b0a304df-d581-4b44-a8a9-7f0fccd511d2"]
-manual-setup = true
+source = "phone:c81eed6f-9152-4418-aec3-8fd89a4e6e3c"
+sources = ["phone:c81eed6f-9152-4418-aec3-8fd89a4e6e3c"]
+manual-setup = false
 room-size-m = [4.0, 2.7, 4.0]
 show-output = true
 
 [[camera.setup]]
-source = "phone:b0a304df-d581-4b44-a8a9-7f0fccd511d2"
-position = [-2.0, 1.4, -2.0]
-rotation = [45.0, -8.049466975528395, 0.0]
+source = "phone:c81eed6f-9152-4418-aec3-8fd89a4e6e3c"
+position = [0.0, 1.4, -2.5]
+rotation = [0.0, -8.0, 0.0]
 horizontal-fov = 60.000
 image-rotation = 0
+latency-ms = 0.000
+lens-intrinsics = []
+lens-distortion = []
 
 [tracking]
 mode = "single"

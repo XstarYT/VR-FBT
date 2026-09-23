@@ -183,6 +183,103 @@ class PhoneGuiTests(FreshProcessGuiTest):
         self.assertEqual(profile.camera_sources, ('phone:first', 'phone:second'))
         self.assertEqual(profile.tracking_mode, 'MULTI')
 
+    def test_start_blocks_when_selected_phone_is_offline(self):
+        self.app.loaded_profile = Profile(camera_source="phone:missing", camera_sources=("phone:missing",))
+        self.app._set_camera_options([], ("phone:missing",))
+        with patch.object(self.app, "_save", return_value=True), \
+             patch.object(self.app.controller, "start") as start, \
+             patch("Lib.GUI.messagebox.showerror") as error:
+            self.app._start()
+        start.assert_not_called()
+        self.assertIn("phone:missing", error.call_args.args[1])
+
+    def test_saved_local_placeholder_is_not_counted_as_available_override(self):
+        selected = ("phone:missing", "local:8")
+        self.app.loaded_profile = Profile(camera_source=selected[0], camera_sources=selected, tracking_mode="MULTI")
+        self.app._set_camera_options([], selected)
+        self.assertEqual(self.app.discovered_local_sources, set())
+        with patch.object(self.app, "_save", return_value=True), \
+             patch.object(self.app.controller, "start") as start, \
+             patch("Lib.GUI.messagebox.showerror") as error, \
+             patch("Lib.GUI.messagebox.askyesno") as offer:
+            self.app._start()
+        start.assert_not_called()
+        offer.assert_not_called()
+        error.assert_called_once()
+
+    def test_start_can_use_connected_subset_without_changing_saved_selection(self):
+        selected = ("phone:online", "phone:missing")
+        self.app.phone_hub.registry.connect("online", "Front", "local")
+        self.app.loaded_profile = Profile(camera_source=selected[0], camera_sources=selected, tracking_mode="MULTI")
+        self.app._set_camera_options([], selected)
+        with patch.object(self.app, "_save", return_value=True), \
+             patch.object(self.app.controller, "start") as start, \
+             patch("Lib.GUI.messagebox.askyesno", return_value=True):
+            self.app._start()
+        session = start.call_args.args[1]
+        self.assertEqual(session.camera_sources, ("phone:online",))
+        self.assertEqual(session.camera_source, "phone:online")
+        self.assertEqual(session.tracking_mode, "SINGLE")
+        self.assertEqual(self.app.loaded_profile.camera_sources, selected)
+
+    def test_setup_wizard_saves_stable_automatic_profile_and_completion_flag(self):
+        from Lib import Config
+        self.app._set_camera_options([LocalCamera(0, "Webcam")])
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.multiple(Config, PROFILES_DIR=Path(directory) / "profiles", SETTINGS_PATH=Path(directory) / "settings.json"), \
+             patch("Lib.Wizard.run_diagnostics", return_value=True):
+            self.app._show_wizard()
+            wizard = self.app._setup_wizard
+            deadline = time.monotonic() + 2
+            while not wizard.diagnostics_ok and time.monotonic() < deadline:
+                self.app.update()
+                time.sleep(0.02)
+            self.assertTrue(wizard.diagnostics_ok)
+            wizard.next()  # VRChat OSC
+            wizard.osc_tested = True
+            wizard.next()  # Connect camera
+            wizard._choose_local()
+            wizard.next()  # Choose camera
+            wizard.next()  # User height
+            wizard.height.set("1.83")
+            wizard.next()  # Trackers
+            wizard.next()  # Summary
+            wizard.next()  # Save
+            self.assertTrue(Config.load_settings(Config.SETTINGS_PATH).first_run_completed)
+            saved = Config.load_profile("Default")
+            self.assertFalse(saved.manual_camera_setup)
+            self.assertEqual(saved.user_height_m, 1.83)
+            self.assertEqual(saved.vrchat_tracker_set, "stable")
+            self.assertEqual(saved.camera_sources, ("local:0",))
+
+    def test_setup_wizard_blocks_continue_after_failed_diagnostics(self):
+        with patch("Lib.Wizard.run_diagnostics", return_value=False):
+            self.app._show_wizard()
+            wizard = self.app._setup_wizard
+            deadline = time.monotonic() + 2
+            while wizard.results.empty() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.app.update()
+            with patch("Lib.Wizard.messagebox.showerror") as error:
+                wizard.next()
+            error.assert_called_once()
+            self.assertEqual(wizard.step, 0)
+            wizard.close()
+
+    def test_start_closes_capture_preview_before_opening_tracking_camera(self):
+        self.app._set_camera_options([LocalCamera(0, "Webcam")])
+        with patch("Lib.Preview.CapturePreview") as preview_class, \
+             patch.object(self.app, "_save", return_value=True), \
+             patch.object(self.app.controller, "start") as start:
+            preview = preview_class.return_value
+            preview.stop.return_value = True
+            self.app._toggle_preview()
+            preview.start.assert_called_once()
+            self.app._start()
+            preview.stop.assert_called_once()
+            start.assert_called_once()
+        self.assertIsNone(self.app._preview)
+
     def test_form_preserves_manual_room_and_camera_layout(self):
         self.app.phone_hub.registry.connect('first', 'Front', 'one')
         self.app.phone_hub.registry.connect('second', 'Side', 'two')

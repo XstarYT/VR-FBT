@@ -10,6 +10,14 @@ SAMPLE_LIMIT = 512
 RATE_WINDOW = 2.0
 
 
+def inference_over_budget(snapshot, target_fps, camera_count):
+    """Check whether a sampled pose worker exceeds 80% of one frame interval."""
+    if camera_count < 2 or target_fps <= 0:
+        return False
+    return any(row["inference"]["count"] >= 10 and row["inference"]["p95_ms"] > 800 / target_fps
+               for row in snapshot["sources"])
+
+
 def percentiles(samples):
     values = sorted(samples)
     if not values:
@@ -39,6 +47,7 @@ class SessionMetrics:
             "stale_rejected": 0, "failures": 0, "pose_detected": False,
             "last_capture": None, "last_result_capture": None,
             "synchronized": None,
+            "reprojection_error_px": None, "calibration_samples": 0,
             "times": deque(maxlen=2048), "inference": deque(maxlen=SAMPLE_LIMIT),
             "capture_to_result": deque(maxlen=SAMPLE_LIMIT),
         } for index, source in enumerate(sources)}
@@ -92,6 +101,14 @@ class SessionMetrics:
             for source, row in self._sources.items():
                 row["synchronized"] = source in selected
 
+    def calibration(self, camera_poses):
+        with self._lock:
+            for pose in camera_poses:
+                row = self._sources.get(pose.source_id)
+                if row is not None and pose.calibrated:
+                    row["reprojection_error_px"] = round(float(pose.reprojection_error), 2)
+                    row["calibration_samples"] = pose.sample_count
+
     def update(self):
         with self._lock:
             now = self.clock()
@@ -120,7 +137,7 @@ class SessionMetrics:
                           "waiting for inference" if result_age is None else "lagging" if result_age > 0.5 else
                           "out of sync" if row["synchronized"] is False else
                           "pose visible" if row["pose_detected"] else "no pose")
-                rows.append({key: row[key] for key in ("alias", "kind", "captures", "capture_skipped", "stale_rejected", "failures")})
+                rows.append({key: row[key] for key in ("alias", "kind", "captures", "capture_skipped", "stale_rejected", "failures", "reprojection_error_px", "calibration_samples")})
                 rows[-1].update(status=status, capture_fps=rate(row["times"]),
                     frame_age_ms=None if age is None else round(age * 1000, 1),
                     inference=percentiles(row["inference"]), capture_to_result=percentiles(row["capture_to_result"]))

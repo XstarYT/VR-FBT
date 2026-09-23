@@ -19,6 +19,7 @@ elements.canvas.toBlob = fn => fn(new Blob(['jpeg']));
 elements.fps.value = '15'; elements.quality.value = '0.7';
 let permissionResolve;
 const sockets = [];
+const reportedCameraErrors = [];
 class Socket {
   static OPEN = 1; static CONNECTING = 0;
   constructor(url) { this.url = url; this.readyState = 0; this.bufferedAmount = 0; sockets.push(this); }
@@ -37,6 +38,7 @@ const context = {
     getUserMedia: () => new Promise(resolve => { permissionResolve = resolve; })}},
   localStorage: {getItem() { throw Error('storage disabled'); }},
   crypto: {randomUUID: () => 'test-phone'}, URLSearchParams, WebSocket: Socket,
+  fetch: async (url, options) => { reportedCameraErrors.push({url, body: JSON.parse(options.body)}); return {ok: true}; },
   performance: {now: () => clockMs}, Blob,
   setInterval: fn => { timers.set(++timerId, fn); return timerId; },
   setTimeout: fn => { timers.set(++timerId, fn); return timerId; },
@@ -104,5 +106,14 @@ function camera() {
   elements.stop.handlers.click();
   assert.equal(videoCallbacks.size, 0);
   assert.equal(timers.size, 0);
+  context.navigator.mediaDevices.getUserMedia = async () => {
+    const error = new Error('Camera blocked by browser'); error.name = 'SecurityError'; throw error;
+  };
+  await elements.start.handlers.click();
+  assert.equal(reportedCameraErrors.length, 1);
+  assert.equal(reportedCameraErrors[0].body.code, 'SecurityError');
+  assert.equal(reportedCameraErrors[0].body.device_id, 'test-phone');
+  assert.match(reportedCameraErrors[0].url, /token=session-secret/);
+  assert.match(elements.notice.textContent, /SecurityError/);
   console.log('PASS: Private browsing, cancel during permission, fragment token, WSS streaming and Stop cleanup');
 })().catch(error => { console.error(error); process.exitCode = 1; });

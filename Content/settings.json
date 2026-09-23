@@ -3,5 +3,6 @@
   "TCP_server": false,
   "UDP_server": false,
   "Live_switch": true,
-  "default_profile": "Default"
+  "default_profile": "Default",
+  "first_run_completed": true
 }

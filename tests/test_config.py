@@ -28,6 +28,8 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(settings.fps, 30)
         self.assertEqual(profile.tracking_mode, "SINGLE")
         self.assertEqual(profile.vrchat_tracker_set, "stable")
+        self.assertFalse(profile.manual_camera_setup)
+        self.assertEqual(profile.camera_source, "local:0")
         self.assertEqual(len(joint_map["KeyPoints"]), 31)
 
     def test_settings_round_trip(self):
@@ -36,6 +38,13 @@ class ConfigurationTests(unittest.TestCase):
             expected = Settings(fps=72, default_profile="Default")
             save_settings(expected, path)
             self.assertEqual(load_settings(path), expected)
+
+    def test_first_run_completion_round_trip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "settings.json"
+            expected = Settings(first_run_completed=True)
+            save_settings(expected, path)
+            self.assertTrue(load_settings(path).first_run_completed)
 
     def test_corner_preset_places_and_aims_a_fixed_camera(self):
         original = CameraSetup("phone:corner", (0.0, 1.4, -2.5), (0.0, 0.0, 0.0), 67.0, 90)

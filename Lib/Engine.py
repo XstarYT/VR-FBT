@@ -11,7 +11,7 @@ import traceback
 from typing import Callable
 
 from Lib.Config import Profile, Settings, load_joint_map, validate_profile, validate_settings
-from Lib.Metrics import SessionMetrics
+from Lib.Metrics import SessionMetrics, inference_over_budget
 from Lib.Synchronization import FrameSynchronizer, MAX_FRAME_AGE
 
 
@@ -212,6 +212,11 @@ class TrackingController:
             estimated_lenses = sum(not setup.lens_intrinsics for setup in camera_setups)
             if len(source_ids) > 1 and estimated_lenses:
                 self.callbacks.log("WARN", f"{estimated_lenses} camera(s) use estimated lenses; import measured lens calibration for more accurate camera rays")
+            if len(source_ids) > 1 and profile.manual_camera_setup:
+                defaults = profile_camera_setups(Profile(camera_source=source_ids[0], camera_sources=source_ids))
+                if any(setup.position == factory.position and setup.rotation == factory.rotation
+                       for setup, factory in zip(camera_setups, defaults)):
+                    self.callbacks.log("WARN", "Camera positions appear to be factory defaults; measure them or switch to automatic mode")
             image_rotations = {setup.source_id: setup.image_rotation for setup in camera_setups}
             latency_offsets = {setup.source_id: setup.latency_ms / 1000 for setup in camera_setups}
             fusion = MultiCameraPoseFusion(
@@ -296,13 +301,22 @@ class TrackingController:
                 if delay:
                     self.callbacks.log("INFO", f"{source}: subtracting {delay * 1000:.1f} ms measured residual camera delay")
             next_health = 0.0
+            slow_inference_since = None
+            slow_inference_warned = False
 
             while not self._stop_event.is_set():
                 observations = []
                 camera_views = []
                 capture_now = time.monotonic()
                 if capture_now >= next_health:
-                    self.callbacks.health(self.metrics.snapshot())
+                    snapshot = self.metrics.snapshot()
+                    self.callbacks.health(snapshot)
+                    if len(source_ids) >= 2 and not slow_inference_warned:
+                        too_slow = inference_over_budget(snapshot, settings.fps, len(source_ids))
+                        slow_inference_since = (slow_inference_since or capture_now) if too_slow else None
+                        if slow_inference_since is not None and capture_now - slow_inference_since >= 10:
+                            self.callbacks.log("WARN", "Pose inference p95 exceeds the dual-camera frame budget; try the Lite model or lower Frame rate on the phone page")
+                            slow_inference_warned = True
                     next_health = capture_now + 0.5
                 for source_id, label, frame, frame_size, captured_at, camera_result, error in inference_pool.poll():
                     if error is not None:
@@ -370,6 +384,8 @@ class TrackingController:
                 last_any_frame = time.monotonic()
                 fusion_started = time.monotonic()
                 fusion_result = fusion.update(observations, cv2)
+                if len(source_ids) > 1 and not profile.manual_camera_setup:
+                    self.metrics.calibration(fusion_result.camera_poses)
                 self.metrics.stage("fusion", (time.monotonic() - fusion_started) * 1000)
                 result = fusion_result.pose
                 confidence = result.confidence
@@ -385,7 +401,7 @@ class TrackingController:
                     calibration_active = True
                     calibration_log_step = -1
                     camera_calibrated_logged = len(captures) == 1
-                    self.callbacks.log("INFO", "Calibrating: hold a T-pose with shoulders, wrists, hips, knees and feet visible in every camera")
+                    self.callbacks.log("INFO", "Camera T-pose calibration: keep shoulders, wrists, hips, knees and feet visible in every camera")
                     # Re-run this frame through the newly reset fusion state.
                     fusion_result = fusion.update(observations, cv2)
                     result, confidence = fusion_result.pose, fusion_result.pose.confidence
@@ -398,7 +414,7 @@ class TrackingController:
                     if not camera_calibrated_logged:
                         camera_calibrated_logged = True
                         self.callbacks.log("PASS", f"Camera geometry calibrated; fusing {fusion_result.contributing_cameras} views")
-                geometry_warning = fusion_result.calibration_hint if fusion_result.calibrated or getattr(fusion_result, 'safety_paused', False) else ""
+                geometry_warning = fusion_result.calibration_hint if (fusion_result.calibrated or fusion_result.safety_paused) and fusion_result.calibration_hint != "T-pose calibration complete" else ""
                 if geometry_warning != last_geometry_warning:
                     if geometry_warning:
                         self.callbacks.log("WARN", geometry_warning)
@@ -414,11 +430,11 @@ class TrackingController:
                     vrchat_frame = vrchat_solver.solve(mapped_pose.KeyPoints, timestamp=now, smooth=profile.smooth)
                     if vrchat_frame is None:
                         current, total = vrchat_solver.calibration_progress
-                        debug_status = "CALIBRATING — HOLD STILL" if current == total else f"CALIBRATING {current}/{total}"
+                        debug_status = "VRCHAT BODY CALIBRATION — HOLD STILL" if current == total else f"VRCHAT BODY CALIBRATION {current}/{total}"
                         log_step = current // 5
                         if log_step != calibration_log_step:
                             calibration_log_step = log_step
-                            self.callbacks.log("INFO", f"Stable-pose calibration {current}/{total}")
+                            self.callbacks.log("INFO", f"VRChat body scale/forward calibration {current}/{total}")
                         had_pose = False
                     else:
                         if calibration_active:

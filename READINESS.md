@@ -1,8 +1,12 @@
-# Readiness assessment — 16 September 2026
+# Readiness assessment — 23 September 2026
 
 The maintained root application is suitable for a supervised multi-camera first-use trial after installation diagnostics pass. A fresh Python environment on this PC passes the software gate. Physical VRChat alignment, long-session reliability, and installation on a clean PC have not been verified in this revision. This is an experimental camera tracker, not a signed end-user release.
 
 **Rendered-human acceptance still fails the coverage target.** The optional DWPose + Full mode and updated fusion improve three-camera confident-joint mean/p95 error to 5.4/11.1 cm, but only about 80% of evaluated joints are confident and within 20 cm (target 90%). Three concurrent CPU workers take roughly 79–82 ms per frame at the median. See the [model comparison](review/simulation/MODEL_COMPARISON.md).
+
+**Acceptance waiver for this experimental build:** the 90% rendered-human joint-coverage gate remains unmet, so it is not part of the passing software verification command. The GUI now states the accuracy limit and recommends Stable hip + feet trackers. Do not treat a passing software suite as a release-quality accuracy claim. The rendered fixture and physical VRChat sequence below must be rerun before removing this waiver.
+
+The current phone setup defaults to automatic geometry, reports offline saved phones before Start, shows per-camera reprojection error in Activity after calibration, and rejects camera pairs with less than 0.5 m baseline or about 12° parallax at the observed torso. The parallax check uses view rays rather than camera forward-vector angle so separated parallel-facing cameras can still calibrate. A first-run assistant and capture-only in-window preview are available. The phone page reports browser camera permission/security failures to the desktop hub when the page can reach it.
 
 **Earlier baseline:** A 32-second animated human fixture processed by the actual Full pose model calibrated with two front views or three front views, but eligible-joint mean error was 13–14 cm and p95 was 48–49 cm. A side-on third view prevented calibration. Exact-joint controls passed normal/jitter conditions. See [the simulation report](review/simulation/REPORT.md) for both layouts, camera images, thresholds, limitations and reproducible commands. These results override any interpretation of software-test success as tracking-readiness evidence.
 

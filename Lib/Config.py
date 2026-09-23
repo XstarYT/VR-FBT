@@ -50,6 +50,7 @@ class Settings:
     tcp_server: bool = False
     udp_server: bool = False
     live_switch: bool = True
+    first_run_completed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,6 +172,7 @@ def load_settings(path: Path = SETTINGS_PATH) -> Settings:
             tcp_server=bool(data.get("TCP_server", False)),
             udp_server=bool(data.get("UDP_server", False)),
             live_switch=bool(data.get("Live_switch", True)),
+            first_run_completed=bool(data.get("first_run_completed", False)),
         )
     except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
         raise ConfigurationError(f"Could not load {path}: {exc}") from exc
@@ -186,6 +188,7 @@ def save_settings(settings: Settings, path: Path = SETTINGS_PATH) -> None:
         "UDP_server": settings.udp_server,
         "Live_switch": settings.live_switch,
         "default_profile": settings.default_profile,
+        "first_run_completed": settings.first_run_completed,
     }
     _atomic_write(path, json.dumps(payload, indent=2) + "\n")
 

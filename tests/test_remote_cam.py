@@ -105,6 +105,19 @@ class RemoteCameraRegistryTests(unittest.TestCase):
 
 @unittest.skipUnless(importlib.util.find_spec("aiohttp"), "aiohttp is not installed")
 class RemoteCameraServerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_camera_permission_error_requires_token_and_has_bounded_codes(self):
+        from aiohttp import ClientSession
+        base = f"http://127.0.0.1:{self.hub.port}/api/camera-error"
+        async with ClientSession() as session:
+            async with session.post(f"{base}?token=wrong", json={"device_id": "phone-1", "code": "SecurityError"}) as response:
+                self.assertEqual(response.status, 401)
+            async with session.post(f"{base}?token={self.hub.token}", json={"device_id": "phone-1", "code": "UnknownError"}) as response:
+                self.assertEqual(response.status, 400)
+            async with session.post(f"{base}?token={self.hub.token}", json={"device_id": "phone-1", "code": "SecurityError"}) as response:
+                self.assertEqual(response.status, 200)
+        self.assertEqual(self.hub.pop_camera_errors(), [("phone-1", "SecurityError")])
+        self.assertEqual(self.hub.pop_camera_errors(), [])
+
     async def test_phone_clock_and_timestamped_frames_preserve_capture_time(self):
         import struct
         from aiohttp import ClientSession

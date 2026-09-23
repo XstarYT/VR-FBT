@@ -9,6 +9,7 @@ import hmac
 import ipaddress
 import math
 import json
+import queue
 import struct
 import os
 import secrets
@@ -57,6 +58,7 @@ class PhoneCameraInfo:
     connected: bool
     last_frame_at: float | None
     sequence: int
+    frame_size: tuple[int, int] | None = None
 
     @property
     def source_id(self) -> str:
@@ -77,6 +79,7 @@ class _PhoneCameraState:
     last_frame_at: float | None = None
     sequence: int = 0
     frame: object | None = None
+    frame_size: tuple[int, int] | None = None
 
 
 def discover_local_cameras(max_probe: int = 8) -> list[LocalCamera]:
@@ -308,6 +311,7 @@ class RemoteCameraRegistry:
             else:
                 state.name, state.address, state.connected = name, address, True
                 state.frame, state.last_frame_at = None, None
+                state.frame_size = None
             self._condition.notify_all()
             info = self._snapshot(state)
         self._on_change()
@@ -353,10 +357,17 @@ class RemoteCameraRegistry:
             if state is None or not state.connected:
                 return False
             state.frame = frame.copy()
+            state.frame_size = (int(frame.shape[1]), int(frame.shape[0]))
             state.sequence += 1
             state.last_frame_at = time.monotonic() if captured_at is None else captured_at
             self._condition.notify_all()
         return True
+
+    def set_frame_size(self, device_id: str, size: tuple[int, int]) -> None:
+        with self._condition:
+            state = self._states.get(device_id)
+            if state is not None and state.connected:
+                state.frame_size = size
 
     def wait_for_frame(self, device_id: str, after_sequence: int = 0, timeout: float = 3.0, *, include_timestamp: bool = False):
         deadline = time.monotonic() + timeout
@@ -381,7 +392,7 @@ class RemoteCameraRegistry:
 
     @staticmethod
     def _snapshot(state: _PhoneCameraState) -> PhoneCameraInfo:
-        return PhoneCameraInfo(state.device_id, state.name, state.address, state.connected, state.last_frame_at, state.sequence)
+        return PhoneCameraInfo(state.device_id, state.name, state.address, state.connected, state.last_frame_at, state.sequence, state.frame_size)
 
 
 class RemoteCameraHub:
@@ -391,6 +402,8 @@ class RemoteCameraHub:
         self.host, self.port = host, port
         self.token = secrets.token_urlsafe(24)
         self.registry = RemoteCameraRegistry(on_change)
+        self._on_change = on_change or (lambda: None)
+        self._camera_errors: queue.SimpleQueue[tuple[str, str]] = queue.SimpleQueue()
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stop_event: asyncio.Event | None = None
@@ -438,6 +451,14 @@ class RemoteCameraHub:
     def local_urls(self) -> list[str]:
         return [f"{self.scheme}://{address}:{self.port}/?token={self.token}" for address in local_ipv4_addresses()]
 
+    def pop_camera_errors(self) -> list[tuple[str, str]]:
+        errors = []
+        while True:
+            try:
+                errors.append(self._camera_errors.get_nowait())
+            except queue.Empty:
+                return errors
+
     def _thread_main(self) -> None:
         try:
             asyncio.run(self._serve())
@@ -461,6 +482,27 @@ class RemoteCameraHub:
             if not self._authorized(request.query.get("token", "")):
                 raise web.HTTPUnauthorized()
             return web.json_response([{"id": item.device_id, "name": item.name, "connected": item.connected, "sequence": item.sequence} for item in self.registry.list_cameras()])
+
+        async def camera_error(request):
+            if not self._authorized(request.query.get("token", "")):
+                raise web.HTTPUnauthorized()
+            if request.content_length is not None and request.content_length > 512:
+                raise web.HTTPRequestEntityTooLarge(max_size=512, actual_size=request.content_length)
+            try:
+                body = await request.content.read(513)
+                if len(body) > 512:
+                    raise web.HTTPRequestEntityTooLarge(max_size=512, actual_size=len(body))
+                payload = json.loads(body)
+                device_id, code = payload["device_id"], payload["code"]
+                if (not isinstance(device_id, str) or not 1 <= len(device_id) <= 80 or
+                    any(not char.isalnum() and char not in "-_" for char in device_id) or
+                    code not in {"NotAllowedError", "NotFoundError", "SecurityError", "NotReadableError"}):
+                    raise ValueError
+            except (ValueError, TypeError, KeyError):
+                raise web.HTTPBadRequest(text="invalid camera error")
+            self._camera_errors.put((device_id, code))
+            self._on_change()
+            return web.json_response({"ok": True})
 
         def reserve_camera(request):
             device_id = request.query.get("device_id", "")
@@ -630,7 +672,7 @@ class RemoteCameraHub:
             self._peer_tasks.clear(); self._peers.clear(); self._sockets.clear()
             self._reservations.clear(); self._connection_owners.clear()
         app.on_shutdown.append(shutdown)
-        app.add_routes([web.get("/", index), web.get("/health", health), web.get("/api/cameras", cameras), web.post("/api/webrtc/offer", webrtc_offer), web.get("/ws", websocket)])
+        app.add_routes([web.get("/", index), web.get("/health", health), web.get("/api/cameras", cameras), web.post("/api/camera-error", camera_error), web.post("/api/webrtc/offer", webrtc_offer), web.get("/ws", websocket)])
         runner = web.AppRunner(app, access_log=None)
         await runner.setup()
         site = web.TCPSite(runner, self.host, self.port, ssl_context=self._ssl_context)
@@ -671,6 +713,8 @@ class RemoteCapture:
             frame = self.cv2.imdecode(np.frombuffer(encoded, dtype=np.uint8), self.cv2.IMREAD_COLOR)
         else:
             frame = encoded.copy()
+        if frame is not None and getattr(frame, "ndim", 0) >= 2:
+            self.registry.set_frame_size(self.device_id, (int(frame.shape[1]), int(frame.shape[0])))
         return frame is not None, frame
 
     def release(self) -> None:

@@ -6,11 +6,31 @@ import unittest
 from zipfile import ZipFile
 
 from Lib.Config import Profile, Settings
-from Lib.Metrics import SAMPLE_LIMIT, SessionMetrics
+from Lib.Metrics import SAMPLE_LIMIT, SessionMetrics, inference_over_budget
+from Lib.Tracking import CameraPose
 from Lib.Support import export_support_bundle
 
 
 class SessionMetricsTests(unittest.TestCase):
+    def test_dual_camera_inference_budget_waits_for_samples(self):
+        metrics = SessionMetrics(("phone:a", "phone:b"))
+        for _ in range(9):
+            metrics.inference("phone:a", 30, 1, 1.03, True)
+        self.assertFalse(inference_over_budget(metrics.snapshot(), 30, 2))
+        metrics.inference("phone:a", 30, 1, 1.03, True)
+        self.assertTrue(inference_over_budget(metrics.snapshot(), 30, 2))
+        self.assertFalse(inference_over_budget(metrics.snapshot(), 30, 1))
+        self.assertFalse(inference_over_budget(metrics.snapshot(), 0, 2))
+
+    def test_calibration_error_is_reported_per_anonymous_source(self):
+        metrics = SessionMetrics(("phone:private-id",))
+        metrics.calibration((CameraPose("phone:private-id", (0, 0, 0), ((1, 0, 0), (0, 1, 0), (0, 0, 1)), 3.25,
+                                        sample_count=12),))
+        row = metrics.snapshot()["sources"][0]
+        self.assertEqual(row["reprojection_error_px"], 3.25)
+        self.assertEqual(row["calibration_samples"], 12)
+        self.assertNotIn("private-id", json.dumps(row))
+
     def test_rates_decay_and_status_distinguishes_pose_loss_stale_and_failure(self):
         now = [0.0]
         metrics = SessionMetrics(("phone:private-id",), clock=lambda: now[0])

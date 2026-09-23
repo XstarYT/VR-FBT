@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from dataclasses import replace
 import logging
+import math
 import queue
 import threading
 import tkinter as tk
@@ -45,10 +46,14 @@ class VRFBTApp(tk.Tk):
         self.loaded_profile = Profile()
         self.camera_sources: dict[str, str] = {}
         self.local_cameras: list[LocalCamera] = []
+        self.discovered_local_sources: set[str] = set()
         self.phone_hub = RemoteCameraHub(host='0.0.0.0', port=0, on_change=lambda: self.events.put(("phone-change",)))
         self._phone_thread = None
         self._phone_cancel = threading.Event()
         self._phone_dialog = None
+        self._preview = None
+        self._preview_sequence = 0
+        self._preview_image = None
         self._closing = False
         self.primary_phone_url = ""
         self.controller = TrackingController(EngineCallbacks(
@@ -103,6 +108,7 @@ class VRFBTApp(tk.Tk):
         self.camera_choice = self.camera_choices[0]  # compatibility for integrations/tests
         self.phone_url = tk.StringVar(value="Phone server is stopped")
         self.manual_camera_setup = tk.BooleanVar(value=False)
+        self.setup_guidance = tk.StringVar(value="1 camera: face it for the 20-frame VRChat body lock.")
         self.room_width, self.room_height, self.room_depth = tk.StringVar(value="4.0"), tk.StringVar(value="2.7"), tk.StringVar(value="4.0")
         self.camera_setup_summary = tk.StringVar(value="Automatic camera calibration · room 4.0 × 2.7 × 4.0 m")
         self.camera_setup_values: dict[str, CameraSetup] = {}
@@ -120,6 +126,7 @@ class VRFBTApp(tk.Tk):
         title_group = ttk.Frame(header); title_group.pack(side="left")
         ttk.Label(title_group, text="VR-FBT", style="Title.TLabel").pack(anchor="w")
         ttk.Label(title_group, text="Low-latency VRChat full-body tracking", style="Muted.TLabel").pack(anchor="w")
+        ttk.Label(title_group, text="Experimental accuracy · prefer Stable hip + feet trackers", foreground=WARN).pack(anchor="w", pady=(4, 0))
         self.status_label = tk.Label(header, textvariable=self.state, bg=PANEL_ALT, fg=MUTED, font=("Segoe UI Semibold", 9), padx=14, pady=7); self.status_label.pack(side="right")
         metrics = ttk.Frame(shell); metrics.pack(fill="x", pady=(0, 16))
         self._metric(metrics, "UPDATE FPS", self.metric_fps).pack(side="left", fill="x", expand=True, padx=(0, 8))
@@ -177,11 +184,20 @@ class VRFBTApp(tk.Tk):
             self._field(left, "CAMERA 3 — OPTIONAL", self.camera_choices[2], "combo", ["Off"]),
         ]
         self.camera_combo = self.camera_combos[0]  # compatibility for integrations/tests
-        ttk.Label(left, text="Multi-camera startup: hold a full-body T-pose for 10 seconds.", foreground=GOOD, style="Panel.TLabel", wraplength=340).pack(anchor="w", pady=(0, 9))
+        ttk.Label(left, textvariable=self.setup_guidance, foreground=GOOD, style="Panel.TLabel", wraplength=340).pack(anchor="w", pady=(0, 9))
+        for choice in self.camera_choices:
+            choice.trace_add("write", lambda *_: self._update_setup_guidance())
+        self.manual_camera_setup.trace_add("write", lambda *_: self._update_setup_guidance())
         camera_actions = ttk.Frame(left, style="Panel.TFrame"); camera_actions.pack(fill="x", pady=(0, 13))
         ttk.Button(camera_actions, text="Refresh cameras", command=self._refresh_cameras).grid(row=0, column=0, sticky="w")
         self.phone_button = ttk.Button(camera_actions, text="Connect phone on LAN", command=self._start_phone_server); self.phone_button.grid(row=0, column=1, padx=8, sticky="w")
         ttk.Button(camera_actions, text="Camera layout…", command=self._show_camera_setup).grid(row=1, column=0, pady=(8, 0), sticky="w")
+        self.preview_button = ttk.Button(camera_actions, text="Preview cameras", command=self._toggle_preview)
+        self.preview_button.grid(row=1, column=1, padx=8, pady=(8, 0), sticky="w")
+        self.preview_status = tk.StringVar(value="")
+        ttk.Label(left, textvariable=self.preview_status, style="PanelMuted.TLabel").pack(anchor="w")
+        self.preview_label = tk.Label(left, bg=INPUT_BG)
+        self.preview_label.pack(fill="x", pady=(0, 8))
         ttk.Label(left, textvariable=self.camera_setup_summary, style="PanelMuted.TLabel", wraplength=430, justify="left").pack(fill="x", pady=(0, 8))
         ttk.Label(left, textvariable=self.phone_url, style="PanelMuted.TLabel", wraplength=430, justify="left").pack(fill="x", pady=(0, 6))
         self.phone_stop_button = ttk.Button(left, text="Stop phone connection", command=self._stop_phone_server, state='disabled')
@@ -197,6 +213,15 @@ class VRFBTApp(tk.Tk):
         tools = ttk.Frame(right, style="Panel.TFrame"); tools.pack(fill="x", pady=(16, 0))
         ttk.Button(tools, text="Send VRChat OSC test", command=self._test_vrchat_osc).pack(side="left")
         ttk.Button(tools, text="Run system diagnostics", command=self._diagnostics).pack(side="left", padx=8)
+        ttk.Button(tools, text="Setup assistant", command=self._show_wizard).pack(side="left", padx=8)
+
+    def _show_wizard(self) -> None:
+        wizard = getattr(self, "_setup_wizard", None)
+        if wizard is not None and wizard.dialog.winfo_exists():
+            wizard.dialog.lift()
+            return
+        from Lib.Wizard import SetupWizard
+        self._setup_wizard = SetupWizard(self)
 
     def _field(self, parent, label, variable, kind="entry", values=None):
         wrapper = ttk.Frame(parent, style="Panel.TFrame"); wrapper.pack(fill="x", pady=(0, 13))
@@ -210,11 +235,11 @@ class VRFBTApp(tk.Tk):
         ttk.Button(toolbar, text="Clear", command=self._clear_log).pack(side="right")
         self.export_button = ttk.Button(toolbar, text="Export support ZIP…", command=self._export_support)
         self.export_button.pack(side="right", padx=8)
-        columns = ("camera", "status", "fps", "inference", "age", "skipped")
+        columns = ("camera", "status", "fps", "inference", "age", "skipped", "reprojection")
         self.health_table = ttk.Treeview(parent, columns=columns, show="headings", height=3, selectmode="none")
         for column, heading, width in zip(columns,
-                ("Camera", "Status", "Capture FPS", "Inference p95 ms", "Frame age ms", "Skipped captures"),
-                (95, 155, 100, 125, 110, 125)):
+                ("Camera", "Status", "Capture FPS", "Inference p95 ms", "Frame age ms", "Skipped captures", "Calib error px"),
+                (95, 155, 100, 125, 110, 125, 110)):
             self.health_table.heading(column, text=heading)
             self.health_table.column(column, width=width, minwidth=65, stretch=True)
         self.health_table.pack(fill="x", pady=(0, 8))
@@ -262,7 +287,7 @@ class VRFBTApp(tk.Tk):
         default_setups = {setup.source_id: setup for setup in profile_camera_setups(temporary)}
         setups = tuple(self.camera_setup_values.get(item, default_setups[item]) for item in sources)
         camera_index = int(source.split(":", 1)[1]) if source.startswith("local:") else self.loaded_profile.camera_index
-        settings = Settings(fps=int(self.fps.get()), default_profile=self.profile_name.get(), tcp_server=self.loaded_settings.tcp_server, udp_server=self.loaded_settings.udp_server, live_switch=self.loaded_settings.live_switch)
+        settings = Settings(fps=int(self.fps.get()), default_profile=self.profile_name.get(), tcp_server=self.loaded_settings.tcp_server, udp_server=self.loaded_settings.udp_server, live_switch=self.loaded_settings.live_switch, first_run_completed=self.loaded_settings.first_run_completed)
         profile = Profile(name=self.profile_name.get(), server_ip=self.osc_host.get().strip(), server_port=int(self.osc_port.get()), camera_index=camera_index, camera_source=source, camera_sources=sources, manual_camera_setup=self.manual_camera_setup.get(), camera_setups=setups, room_size_m=(float(self.room_width.get()), float(self.room_height.get()), float(self.room_depth.get())), show_output=self.show_output.get(), tracking_mode="MULTI" if len(sources) > 1 else "SINGLE", smooth=self.smooth.get(), pose_quality=POSE_QUALITY_LABELS.get(self.pose_quality.get(), "full"), vrchat_tracker_set=TRACKER_SET_LABELS.get(self.tracker_set.get(), "stable"), joint_map=self.joint_map.get(), joy_con_remote=self.loaded_profile.joy_con_remote, user_height_m=float(self.user_height.get()))
         return settings, profile
 
@@ -297,13 +322,66 @@ class VRFBTApp(tk.Tk):
         self._write_log("PASS", f"Created profile {name}; it is now the startup profile")
 
     def _start(self) -> None:
+        if self._preview is not None and not self._stop_preview():
+            messagebox.showerror("Preview still closing", "Wait for the camera preview to release its sources, then start again.", parent=self)
+            return
         if not self._save(quiet=True): return
         try:
             settings, profile = self._configuration_from_form()
+            selected = profile_camera_sources(profile)
+            connected_phones = {camera.source_id for camera in self.phone_hub.registry.list_cameras(False)}
+            discovered_locals = self.discovered_local_sources
+            missing = [source for source in selected if source.startswith("phone:") and source not in connected_phones]
+            if missing:
+                available = tuple(source for source in selected if source in connected_phones or source in discovered_locals)
+                detail = "\n".join(missing)
+                if not available:
+                    messagebox.showerror("Phone camera offline", f"These saved phones are offline:\n{detail}\n\nConnect a phone and refresh cameras before starting.", parent=self)
+                    return
+                if not messagebox.askyesno("Phone camera offline", f"These saved phones are offline:\n{detail}\n\nStart this session with the {len(available)} available camera(s) only? The saved profile will keep its original selection.", parent=self):
+                    return
+                profile = replace(profile, camera_source=available[0], camera_sources=available,
+                    tracking_mode="MULTI" if len(available) > 1 else "SINGLE",
+                    camera_setups=tuple(setup for setup in profile.camera_setups if setup.source_id in available))
+                self._write_log("WARN", f"Starting with {len(available)} available camera(s); offline saved phones were excluded")
             self.controller.start(settings, profile, self.phone_hub); self.start_button.configure(state="disabled"); self.stop_button.configure(state="normal")
         except Exception as exc: messagebox.showerror("Could not start", str(exc))
 
     def _stop(self) -> None: self.controller.stop()
+
+    def _toggle_preview(self) -> None:
+        if self._preview is not None:
+            self._stop_preview()
+            return
+        if self.controller.running:
+            messagebox.showinfo("Preview cameras", "Stop tracking before opening a capture-only preview.", parent=self)
+            return
+        sources = tuple(source for choice in self.camera_choices
+                        if choice.get() != "Off" and (source := self.camera_sources.get(choice.get())))
+        if not sources:
+            messagebox.showinfo("Preview cameras", "Select a camera first.", parent=self)
+            return
+        from Lib.Preview import CapturePreview
+        self._preview = CapturePreview(sources, self.phone_hub.registry,
+                                       ((source, self.camera_setup_values[source].image_rotation)
+                                        for source in sources if source in self.camera_setup_values))
+        self._preview_sequence = 0
+        self._preview.start()
+        self.preview_button.configure(text="Stop preview")
+        self.preview_status.set("Opening selected camera frames…")
+
+    def _stop_preview(self) -> bool:
+        if self._preview is None:
+            return True
+        if not self._preview.stop():
+            self._write_log("WARN", "Preview source is still closing")
+            return False
+        self._preview = None
+        self.preview_button.configure(text="Preview cameras")
+        self.preview_status.set("")
+        self.preview_label.configure(image="")
+        self._preview_image = None
+        return True
 
     def _realign_vrchat(self) -> None:
         try:
@@ -382,7 +460,16 @@ class VRFBTApp(tk.Tk):
                 elif event[0] == "stats": self.metric_fps.set(f"{event[1]:.1f}"); self.metric_visibility.set(f"{event[2] * 100:.0f}%"); self.metric_frames.set(f"{event[3]:,}")
                 elif event[0] == "health": self._show_health(event[1])
                 elif event[0] == "camera-scan": self._set_camera_options(event[1])
-                elif event[0] == "phone-change": self._set_camera_options(self.local_cameras)
+                elif event[0] == "phone-change":
+                    self._set_camera_options(self.local_cameras)
+                    for _device_id, code in self.phone_hub.pop_camera_errors():
+                        explanation = {
+                            "SecurityError": "Browser blocked the camera. Trust the local certificate or use another browser.",
+                            "NotAllowedError": "Phone camera permission was denied. Allow camera access in the browser and try again.",
+                            "NotFoundError": "No phone camera was found. Check camera selection and browser permissions.",
+                            "NotReadableError": "The phone camera is busy or unavailable. Close other camera apps and retry.",
+                        }[code]
+                        self._write_log("ERROR", explanation)
                 elif event[0] == "support-export":
                     self.export_button.configure(state="normal")
                     if event[2] is None:
@@ -405,11 +492,25 @@ class VRFBTApp(tk.Tk):
                         messagebox.showerror('Phone connection', event[1])
         
         except queue.Empty: pass
+        self._show_preview_frame()
         if self.primary_phone_url and not self.phone_hub.running:
             self._write_log('ERROR', 'Phone camera server stopped. Click Connect phones to start it again.')
             self._stop_phone_server()
         if not self._closing:
             self._event_timer = self.after(80, self._drain_events)
+
+    def _show_preview_frame(self) -> None:
+        if self._preview is None:
+            return
+        latest = self._preview.latest()
+        if latest is None or latest[0] == self._preview_sequence:
+            return
+        self._preview_sequence, frame, received = latest
+        from PIL import Image, ImageTk
+        import cv2
+        self._preview_image = ImageTk.PhotoImage(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
+        self.preview_label.configure(image=self._preview_image)
+        self.preview_status.set(f"Frames received: {received}/{len(self._preview.sources)} · capture-only preview")
 
     def _set_state(self, state) -> None:
         self.state.set(state.upper()); self.status_label.configure(fg={"running": GOOD, "starting": WARN, "stopping": WARN, "error": BAD}.get(state, MUTED))
@@ -426,7 +527,8 @@ class VRFBTApp(tk.Tk):
             age = row["frame_age_ms"]
             self.health_table.insert("", "end", values=(row["alias"], row["status"],
                 f"{row['capture_fps']:.1f}", "—" if p95 is None else f"{p95:.1f}",
-                "—" if age is None else f"{age:.0f}", row["capture_skipped"]))
+                "—" if age is None else f"{age:.0f}", row["capture_skipped"],
+                "—" if row.get("reprojection_error_px") is None else f"{row['reprojection_error_px']:.1f}"))
 
     def _write_log(self, level, message) -> None:
         logging.getLogger("vrfbt").log({"ERROR": logging.ERROR, "WARN": logging.WARNING, "DEBUG": logging.DEBUG}.get(level, logging.INFO), message)
@@ -458,11 +560,12 @@ class VRFBTApp(tk.Tk):
         else:
             selected_sources = list(desired_sources)
         cameras = list(local_cameras)
+        self.local_cameras = list(cameras)
+        self.discovered_local_sources = {camera.source_id for camera in cameras}
         for configured in configured_sources:
             if not any(camera.source_id == configured for camera in cameras) and configured.startswith("local:"):
                 index = int(configured.split(":", 1)[1])
                 cameras.append(LocalCamera(index, f"Camera {index}"))
-        self.local_cameras = cameras
         entries = [(camera.display_name, camera.source_id) for camera in cameras]
         entries.extend((camera.display_name, camera.source_id) for camera in self.phone_hub.registry.list_cameras())
         for configured in configured_sources:
@@ -490,9 +593,11 @@ class VRFBTApp(tk.Tk):
         for combo in self.camera_combos[1:]:
             combo.configure(values=["Off", *values])
         self._select_sources(tuple(source for source in selected_sources if source))
+        if hasattr(self, "setup_guidance"):
+            self._update_setup_guidance()
         if sources and self.camera_choice.get() not in sources:
             self.camera_choice.set(next(iter(sources)))
-        local_count = len(cameras); phone_count = len(self.phone_hub.registry.list_cameras(False))
+        local_count = len(self.local_cameras); phone_count = len(self.phone_hub.registry.list_cameras(False))
         self._write_log("PASS", f"Camera list updated: {local_count} local, {phone_count} connected phone(s)")
 
     def _select_source(self, source_id: str) -> None:
@@ -509,6 +614,16 @@ class VRFBTApp(tk.Tk):
         self.camera_setup_summary.set(
             f"{mode} · room {self.room_width.get()} × {self.room_height.get()} × {self.room_depth.get()} m"
         )
+
+    def _update_setup_guidance(self) -> None:
+        sources = [self.camera_sources.get(choice.get()) for choice in self.camera_choices if choice.get() != "Off"]
+        if len([source for source in sources if source]) <= 1:
+            text = "1 camera: face it; the VRChat body scale and forward lock takes 20 frames after tracking starts."
+        elif self.manual_camera_setup.get():
+            text = "Fixed room: measure room W × H × D and every camera mount height. Wrong positions harm triangulation."
+        else:
+            text = "Automatic: hold a full-body T-pose visible on every camera for 10 s. Room corners are optional."
+        self.setup_guidance.set(text)
 
     def _show_camera_setup(self) -> None:
         sources = tuple(
@@ -562,15 +677,30 @@ class VRFBTApp(tk.Tk):
 
         ttk.Label(
             box,
-            text="Quick setup: choose a corner and enter the camera height; X, Z, yaw and pitch are calculated when you apply.\nCustom mode keeps every numeric transform editable. The room center is X=0/Z=0 and floor is Y=0. Image rotation is clockwise.\nDelay: measured extra camera latency (0–200 ms) missing from its timestamp. Positive values move the capture time earlier. Leave 0 unless measured.",
+            text="Automatic phone geometry: leave fixed room anchoring off unless room and mounts are measured. Choosing a corner enables it.\nH-FOV is estimated (phones: try 55–70° if feet or knees drift at frame edges). It refers to the native image before rotation.\nDelay is measured extra camera latency (0–200 ms) missing from its timestamp. Leave 0 unless measured.",
             style="Muted.TLabel",
             justify="left",
         ).grid(row=8, column=0, columnspan=10, sticky="w", pady=(14, 10))
 
         lens_actions = ttk.Frame(box)
         lens_actions.grid(row=9, column=0, columnspan=10, sticky="w")
+        phone_info = {camera.source_id: camera for camera in self.phone_hub.registry.list_cameras()}
         for index, source in enumerate(sources):
             status = tk.StringVar(value=f"CAM {index+1}: {'measured lens' if lens_values[source][0] else 'estimated lens'}")
+            frame_size = phone_info[source].frame_size if source in phone_info else None
+            focal_info = tk.StringVar()
+            def update_focal(*_args, source=source, frame_size=frame_size, output=focal_info):
+                if frame_size is None:
+                    output.set("native size unknown until a frame arrives")
+                    return
+                try:
+                    fov = float(setup_variables[source][1][6].get())
+                    focal = frame_size[0] / (2 * math.tan(math.radians(fov) / 2))
+                    output.set(f"native {frame_size[0]} × {frame_size[1]} · estimated fx {focal:.0f} px")
+                except (ValueError, ZeroDivisionError):
+                    output.set(f"native {frame_size[0]} × {frame_size[1]}")
+            setup_variables[source][1][6].trace_add("write", update_focal)
+            update_focal()
             def import_lens(source=source, status=status, index=index):
                 path = filedialog.askopenfilename(parent=dialog, title="Import measured lens calibration", filetypes=[("Lens calibration", "*.json")])
                 if not path:
@@ -588,6 +718,10 @@ class VRFBTApp(tk.Tk):
             ttk.Label(lens_actions, textvariable=status).grid(row=index, column=0, sticky="w", padx=4)
             ttk.Button(lens_actions, text="Import lens…", command=import_lens).grid(row=index, column=1, padx=4)
             ttk.Button(lens_actions, text="Clear lens", command=clear_lens).grid(row=index, column=2, padx=4)
+            ttk.Label(lens_actions, textvariable=focal_info, style="Muted.TLabel").grid(row=index, column=3, sticky="w", padx=8)
+        ttk.Button(lens_actions, text="Measure delay", command=lambda: messagebox.showinfo(
+            "Measure camera delay", "Film a clap or flash visible to every camera. Compare the event frame times, enter each camera's extra delay (0–200 ms), then retest with quick motion. Leave zero if you cannot measure it.", parent=dialog,
+        )).grid(row=len(sources), column=0, columnspan=2, sticky="w", pady=(6, 0))
 
         def apply_layout():
             try:
@@ -714,6 +848,8 @@ class VRFBTApp(tk.Tk):
 
     def _stop_phone_server(self):
         self._phone_cancel.set()
+        if self._preview is not None and any(source.startswith("phone:") for source in self._preview.sources):
+            self._stop_preview()
         if self.controller.running:
             self.controller.stop()
         self.phone_hub.stop()
@@ -729,6 +865,7 @@ class VRFBTApp(tk.Tk):
     def _on_close(self) -> None:
         self._closing = True
         self.after_cancel(self._event_timer)
+        self._stop_preview()
         self._stop_phone_server()
         if self.controller.running: self.controller.stop(); self.controller.wait(2.0)
         if self._phone_thread:
@@ -737,4 +874,7 @@ class VRFBTApp(tk.Tk):
 
 
 def launch() -> None:
-    VRFBTApp().mainloop()
+    app = VRFBTApp()
+    if not app.loaded_settings.first_run_completed:
+        app.after(500, app._show_wizard)
+    app.mainloop()

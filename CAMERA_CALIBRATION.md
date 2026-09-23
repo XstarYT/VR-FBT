@@ -32,6 +32,13 @@ layout and T-pose calibration. A bad lens file can make tracking worse.
 **Clear lens** returns a camera to estimated FOV. Both camera-layout modes support
 measured lenses. The saved focal lengths override the FOV field while present.
 
+For an automatic multi-camera T-pose, Activity shows each camera's mean accepted
+PnP reprojection error in pixels. An error above 8 px triggers an import-lens
+hint. It is a troubleshooting signal rather than an accuracy guarantee: pose
+landmark errors, framing, and timing can also raise reprojection error. The
+Camera layout dialog shows the connected phone's native frame size after the
+first frame arrives, so collect checkerboard frames at that same resolution.
+
 When the app reports camera disagreement, first check whether a camera moved,
 whether the correct lens was assigned, and whether capture delays are correct.
 Restore the camera layout or correct its settings, then use **Recalibrate & align**.

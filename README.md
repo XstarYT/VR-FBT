@@ -12,6 +12,14 @@ Windows camera-based full-body tracking for VRChat. VR-FBT runs Google's MediaPi
 - One to three local webcams/phones; phones and PC must share the same local network
 - OpenSSL (Git for Windows' bundled OpenSSL is detected automatically)
 
+## Recommended: one or two phones with automatic geometry
+
+Start the phone server, connect each phone on the same LAN, then select the connected phone cameras. For two phones, place one in front and one to the side and hold a full-body T-pose visible to both for 10 seconds. The app estimates their relative camera positions. With one phone, face the camera; the VRChat body scale and forward lock takes 20 tracking frames. The stock Default profile uses automatic geometry and a local-camera placeholder so it does not point to someone else's saved phone ID. Select your own sources before Start.
+
+Keep **Anchor cameras at fixed positions in the virtual room** off unless you have measured the room and camera mounts. The room and corner coordinates shown in Default are placeholders in automatic mode. Choosing a corner preset intentionally enables fixed-room mode. Each camera's estimated horizontal FOV starts at 60°; if knees or feet drift near the image edges, try 55–70° or import a measured lens calibration. The Camera layout dialog shows a connected phone's native frame size and estimated focal length after a frame arrives. [Checkerboard lens calibration](CAMERA_CALIBRATION.md) is useful when calibration reports high reprojection error.
+
+Saved phones that are offline are reported before tracking starts. If another selected camera is available, you can start that session with the available subset; the saved source selection remains intact. The interface labels tracking accuracy experimental and recommends the Stable hip + feet tracker set.
+
 ## Install and run
 
 For guided source setup, install 64-bit Python 3.12 and Git for Windows, then double-click **setup.bat**. It creates the local environment if needed, installs dependencies, and runs diagnostics. It preserves an existing environment and reports an incompatible Python version instead of deleting it. Alternatively, use the commands below.
@@ -28,6 +36,8 @@ python Main.py
 ```
 
 After setup, `run.bat` starts the repository-local environment without manual activation.
+
+On first launch, the setup assistant checks dependencies, sends an OSC test pulse, guides phone or local camera connection, asks for standing height, and saves the Stable tracker set by default. You can reopen it from **Setup assistant**. **Preview cameras** shows frames and resolution in the main window without starting pose inference; stop preview before tracking. A phone's browser camera or security error appears in Activity when the page can reach the local hub.
 
 Start, Stop, Recalibrate and Save remain in the fixed bottom bar. Setup switches to a single column on narrower windows; use the scrollbar or mouse wheel to reach the remaining fields. Keyboard focus brings off-screen fields into view.
 
@@ -87,6 +97,8 @@ There is one phone connection method: direct local-network HTTPS. There is no An
 The link includes a random session token and changes after restart. Keep it within your local network. WebRTC is attempted first with no STUN or TURN relay; JPEG-over-secure-WebSocket is the fallback. The receiver keeps only the newest frame so old frames do not build up into extra tracking latency. Up to three phones can connect and all three can be used by one tracking session.
 
 ## Multi-camera tracking and calibration
+
+The desktop engine uses `Lib/Tracking.py` for T-pose calibration and fusion. The separate `vrfbt_calib` package is an experimental research path; its tests do not validate desktop behavior. Changes to desktop calibration need desktop-path tests.
 
 For imperfect lenses, follow [measured lens calibration](CAMERA_CALIBRATION.md).
 The camera-layout dialog can import a separate calibration for each camera;
@@ -148,3 +160,5 @@ The suite covers VRChat path construction, all eight position/rotation transform
 Software tests cannot prove physical avatar alignment. The remaining acceptance test is to view the generated trackers in VRChat with the intended camera position, perform avatar calibration, and check neutral standing, turns, squats, feet, and occlusion recovery. See `AUDIT.md` for the evidence and remaining limitations.
 
 See [READINESS.md](READINESS.md) for the current readiness assessment, the latest fixes, prioritized improvements, and the physical acceptance checklist. Older audit results describe earlier revisions.
+
+The decisions for the supplied `to-fix` list, including deferred product work and acceptance evidence, are recorded in [FIX_STATUS.md](FIX_STATUS.md).
