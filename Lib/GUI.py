@@ -97,6 +97,10 @@ class VRFBTApp(tk.Tk):
         style.configure("TNotebook", background=BG, borderwidth=0)
         style.configure("TNotebook.Tab", background=BG, foreground=MUTED, padding=(18, 10), font=("Segoe UI Semibold", 10))
         style.map("TNotebook.Tab", background=[("selected", PANEL)], foreground=[("selected", TEXT)])
+        style.configure("Treeview", background=PANEL_ALT, fieldbackground=PANEL_ALT, foreground=TEXT, rowheight=26)
+        style.map("Treeview", background=[("selected", ACCENT)], foreground=[("selected", TEXT)])
+        style.configure("Treeview.Heading", background=PANEL, foreground=TEXT)
+        style.map("Treeview.Heading", background=[("active", PANEL_ALT)], foreground=[("active", TEXT)])
 
     def _build_variables(self) -> None:
         self.profile_name, self.fps = tk.StringVar(value="Default"), tk.StringVar(value="30")

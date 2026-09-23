@@ -20,6 +20,13 @@ StateCallback = Callable[[str], None]
 StatsCallback = Callable[[float, float, int], None]
 
 
+def _runtime_geometry_warning(fusion_result, camera_count: int) -> str:
+    hint = fusion_result.calibration_hint
+    if not hint or hint == "T-pose calibration complete":
+        return ""
+    return hint if fusion_result.safety_paused or (camera_count > 1 and fusion_result.calibrated) else ""
+
+
 class _LatestFrameReader:
     """Continuously capture one source without blocking the tracking loop."""
 
@@ -414,7 +421,7 @@ class TrackingController:
                     if not camera_calibrated_logged:
                         camera_calibrated_logged = True
                         self.callbacks.log("PASS", f"Camera geometry calibrated; fusing {fusion_result.contributing_cameras} views")
-                geometry_warning = fusion_result.calibration_hint if (fusion_result.calibrated or fusion_result.safety_paused) and fusion_result.calibration_hint != "T-pose calibration complete" else ""
+                geometry_warning = _runtime_geometry_warning(fusion_result, len(source_ids))
                 if geometry_warning != last_geometry_warning:
                     if geometry_warning:
                         self.callbacks.log("WARN", geometry_warning)

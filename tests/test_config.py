@@ -25,11 +25,10 @@ class ConfigurationTests(unittest.TestCase):
         settings = load_settings()
         profile = load_profile(settings.default_profile)
         joint_map = load_joint_map(profile.joint_map)
-        self.assertEqual(settings.fps, 30)
-        self.assertEqual(profile.tracking_mode, "SINGLE")
-        self.assertEqual(profile.vrchat_tracker_set, "stable")
-        self.assertFalse(profile.manual_camera_setup)
-        self.assertEqual(profile.camera_source, "local:0")
+        validate_settings(settings)
+        validate_profile(profile)
+        self.assertEqual(profile.name, settings.default_profile)
+        self.assertTrue(profile.camera_source)
         self.assertEqual(len(joint_map["KeyPoints"]), 31)
 
     def test_settings_round_trip(self):

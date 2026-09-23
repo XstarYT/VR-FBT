@@ -26,6 +26,13 @@ class PhoneGuiTests(FreshProcessGuiTest):
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[1][1], "failed")
 
+    def test_activity_health_table_has_readable_text(self):
+        style = self.app.tk.call
+        background = style("ttk::style", "lookup", "Treeview", "-background")
+        foreground = style("ttk::style", "lookup", "Treeview", "-foreground")
+        self.assertEqual(background.lower(), "#182238")
+        self.assertEqual(foreground.lower(), "#ffffff")
+
     def test_save_as_preserves_old_rig_and_selects_new_profile(self):
         from Lib import Config
         with tempfile.TemporaryDirectory() as directory:
@@ -267,7 +274,7 @@ class PhoneGuiTests(FreshProcessGuiTest):
             wizard.close()
 
     def test_start_closes_capture_preview_before_opening_tracking_camera(self):
-        self.app._set_camera_options([LocalCamera(0, "Webcam")])
+        self.app._set_camera_options([LocalCamera(0, "Webcam")], desired_sources=("local:0",))
         with patch("Lib.Preview.CapturePreview") as preview_class, \
              patch.object(self.app, "_save", return_value=True), \
              patch.object(self.app.controller, "start") as start:

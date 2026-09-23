@@ -4,14 +4,23 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
-from Lib.Engine import _LatestFrameReader
+from Lib.Engine import _LatestFrameReader, _runtime_geometry_warning
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReviewRegressionTests(unittest.TestCase):
+    def test_one_camera_does_not_emit_multicamera_t_pose_hint(self):
+        result = SimpleNamespace(calibration_hint="Stand in a T-pose where every camera sees your full body",
+                                 calibrated=True, safety_paused=False)
+        self.assertEqual(_runtime_geometry_warning(result, 1), "")
+        self.assertEqual(_runtime_geometry_warning(result, 2), result.calibration_hint)
+        result.safety_paused = True
+        self.assertEqual(_runtime_geometry_warning(result, 1), result.calibration_hint)
+
     def test_silent_capture_does_not_block_healthy_capture_worker(self):
         class Capture:
             def __init__(self, delay, succeeds):
